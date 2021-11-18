@@ -46,10 +46,10 @@ class ImageDataset(Dataset):
         img_name = os.path.join(self.image_dir, self.image_list[idx])
         sample = cv2.imread(img_name)
         # print(sample/255)
+        # print(sample.shape)   
 
         if self.transform:
             sample = self.transform(sample)
-        # print(sample)   
         return self.image_list[idx], sample
     
     
@@ -58,14 +58,15 @@ def image_loader(image_dir, data_dir, batch_size, num_workers, image_size, recal
     if recalculate_normalize:
         transform = torchvision.transforms.Compose([torchvision.transforms.ToTensor()])       
         trainset = ImageDataset(image_dir, data_dir, train=False, transform=transform)
-        all_images = trainset[0].reshape(3, -1)
+        
+        all_images = trainset[0][1].reshape(3, -1)
         for i in range(1,len(trainset)):
-            all_images = torch.cat((all_images, trainset[i].reshape(3, -1)), dim=1)
+            all_images = torch.cat((all_images, trainset[i][1].reshape(3, -1)), dim=1)
         mean = torch.mean(all_images, axis=1)
         std = torch.std(all_images, axis=1)
 
-        print("Satellite Mean: ", mean)
-        print("Satellite Std:", std)
+        print("Image Mean: ", mean)
+        print("Image Std:", std)
     else:
         mean = [0.3733, 0.3991, 0.3711]
         std = [0.2173, 0.2055, 0.2143]
@@ -75,7 +76,6 @@ def image_loader(image_dir, data_dir, batch_size, num_workers, image_size, recal
         torchvision.transforms.CenterCrop(image_size),
         torchvision.transforms.Normalize(mean, std)
     ])
-
 
     trainset = ImageDataset(image_dir, data_dir, train=True, transform=transform)
     testset = ImageDataset(image_dir, data_dir, train=False, transform=transform)
