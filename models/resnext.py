@@ -187,10 +187,10 @@ class Encoder(nn.Module):
         self.stage4 = self._make_stage(n_channels[3], n_channels[4], 3, stride=2)
 
         # compute conv feature size
-        with torch.no_grad():
-            self.feature_size = self.forward(torch.zeros(*input_shape)).shape
-            print('Encoder', self.feature_size)
-            # print(self.feature_size)
+        #with torch.no_grad():
+        #    self.feature_size = self.forward(torch.zeros(*input_shape)).shape
+        #    print('Encoder', self.feature_size)
+        #    print(self.feature_size)
 
         # self.fc = nn.Linear(reduce(lambda x,y: x*y, self.feature_size[1:]), self.n_features)
 
@@ -294,10 +294,10 @@ class Decoder(nn.Module):
         # initialize weights
         self.apply(initialize_weights)
 
-        with torch.no_grad():
-            self.feature_size = self.forward(
-                torch.zeros(*self.input_shape)).shape
-            print('Decoder:', self.feature_size)
+#         with torch.no_grad():
+#             self.feature_size = self.forward(
+#                 torch.zeros(*self.input_shape)).shape
+#             print('Decoder:', self.feature_size)
 
 
     def _make_stage(self, in_channels, out_channels, n_blocks, stride):

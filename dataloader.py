@@ -12,6 +12,7 @@ import torchvision.transforms
 import cv2
 import os
 import glob
+from setup import data_dir
 
 class ImageDataset(Dataset):
 
@@ -124,3 +125,64 @@ def get_loader(batch_size, num_workers): # Load CIFAR data
         drop_last=False,
     )
     return train_loader, test_loader
+
+
+class SurveyDataset(Dataset):
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
+
+    def __len__(self):
+        return len(self.y)
+
+    def __getitem__(self, idx):
+        return tuple((self.x[idx], self.y[idx]))
+
+def train_test_split(x):
+    
+    data = pd.read_csv(data_dir+"census_tracts_filtered.csv")
+    data = pd.merge(x, data, on='geoid')
+    data = data.sort_values(by='geoid')
+    
+    return data
+
+def load_aggregate_travel_behavior(file, unique_ct=None):
+    
+    df = pd.read_csv(data_dir+file)
+    df['mode_share'] = df['wtperfin_mode']/df['wtperfin_all']
+    df_pivot = pd.pivot_table(df, values='mode_share', 
+                              index=['state_1','state_fips_1','county_fips_1','tract_fips_1'], columns=['mode'])
+
+    trpgen = df.groupby(['state_1','state_fips_1','county_fips_1','tract_fips_1']).mean()['wtperfin_all']
+
+    df_pivot = pd.merge(df_pivot, trpgen, on=['state_1','state_fips_1','county_fips_1','tract_fips_1'])
+    df_pivot.reset_index(inplace=True)
+    df_pivot.rename(columns={'wtperfin_all':'trpgen',1:'active',2:'auto',3:'mas',4:'pt'}, inplace=True)
+    df_pivot['geoid'] = df_pivot['state_fips_1'].astype(str)+"_"+df_pivot['county_fips_1'].astype(str)+"_"+df_pivot['tract_fips_1'].astype(str)
+    if unique_ct is not None:
+        df_pivot = df_pivot[df_pivot['geoid'].isin(unique_ct)]
+    df_pivot.sort_values(by='geoid',inplace=True)
+    # turn trip generation units to 1k trips
+    df_pivot['trpgen'] = df_pivot['trpgen']/1000
+    
+    data = train_test_split(df_pivot)
+    
+    return data
+
+
+def load_demo(data_dir):
+
+    demo_df = pd.read_csv(data_dir+"demo_tract.csv")
+    demo_df['census_tract'] = '17_'+demo_df['COUNTYA'].astype(str)+'_'+demo_df['TRACTA'].astype(str)
+
+    for d in ['tot_population','pct25_34yrs','pct35_50yrs','pctover65yrs',
+             'pctwhite_alone','pct_nonwhite','pctblack_alone',
+             'pct_col_grad','avg_tt_to_work','inc_per_capita']:
+        demo_df[d] = demo_df[d]/demo_df[d].max()
+
+    demo_np = demo_df[['tot_population','pct25_34yrs','pct35_50yrs','pctover65yrs',
+             'pctwhite_alone','pct_nonwhite','pctblack_alone',
+             'pct_col_grad','avg_tt_to_work','inc_per_capita']].to_numpy()
+    demo_cs = demo_df['census_tract'].tolist()
+    
+    return demo_cs, demo_np
