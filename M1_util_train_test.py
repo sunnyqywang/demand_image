@@ -53,7 +53,7 @@ def train(epoch, model, optimizer, criterion, train_loader, model_regularizer, r
 
         out_image, out_demo = model(data)
 
-        loss = criterion(out_image, out_demo, data, census_data)
+        loss = criterion(out_image, out_demo, data, census_data, factor=run_config['weight'])
         loss.backward()
 
         optimizer.step()
@@ -130,7 +130,7 @@ def test(epoch, model, criterion, test_loader, model_regularizer, run_config, wr
 #         print(torch.max(data))
 #         print(torch.min(data))
         
-        loss = criterion(out_image, out_demo, data, census_data)
+        loss = criterion(out_image, out_demo, data, census_data, factor=run_config['weight'])
        
         loss_ = loss.item()
 #         print(loss_)

@@ -16,7 +16,7 @@ from setup import data_dir
 
 class ImageDataset(Dataset):
 
-    def __init__(self, image_dir, data_dir, train, transform=None):
+    def __init__(self, image_dir, data_dir, train, transform=None, sampling='cluster'):
         """
         Args:
             image_dir (string): Directory with all the images.
@@ -26,17 +26,28 @@ class ImageDataset(Dataset):
         self.image_dir = image_dir
         self.transform = transform
         data = pd.read_csv(data_dir+"census_tracts_filtered.csv")
-        if train:
-            data = data[data['train_test']==0]
-        else:
-            data = data[data['train_test']==1]
-        
-        tracts = [str(s)+'_'+str(c)+'_'+str(t) for (s,c,t) in zip(data['state_fips'], data['county_fips'], data['tract_fips'])]
         self.image_list = []
+
+        if sampling == 'clustered':
+            if train:
+                data = data[data['train_test']==0]
+            else:
+                data = data[data['train_test']==1]
+
+            tracts = [str(s)+'_'+str(c)+'_'+str(t) for (s,c,t) in zip(data['state_fips'], data['county_fips'], data['tract_fips'])]
+
+            for f in tracts:
+                self.image_list += glob.glob(image_dir+f+"_*.png")
         
-        for f in tracts:
-            self.image_list += glob.glob(image_dir+f+"_*.png")
-        
+        if sampling == 'stratified':
+            for f in data['geoid']:
+                im = glob.glob(image_dir+f+"_*.png")
+                im = sorted(im)
+                n = int(len(im) * 0.1)
+                if train:
+                    self.image_list += im[:-n]
+                else:
+                    self.image_list += im[-n:]
     def __len__(self):
         return len(self.image_list)
 
@@ -54,11 +65,11 @@ class ImageDataset(Dataset):
         return self.image_list[idx], sample
     
     
-def image_loader(image_dir, data_dir, batch_size, num_workers, image_size, recalculate_normalize=False):
+def image_loader(image_dir, data_dir, batch_size, num_workers, image_size, sampling='cluster', recalculate_normalize=False):
     
     if recalculate_normalize:
         transform = torchvision.transforms.Compose([torchvision.transforms.ToTensor()])       
-        trainset = ImageDataset(image_dir, data_dir, train=False, transform=transform)
+        trainset = ImageDataset(image_dir, data_dir, train=False, transform=transform, sampling=sampling)
         
         all_images = trainset[0][1].reshape(3, -1)
         for i in range(1,len(trainset)):
@@ -78,9 +89,12 @@ def image_loader(image_dir, data_dir, batch_size, num_workers, image_size, recal
         torchvision.transforms.Normalize(mean, std)
     ])
 
-    trainset = ImageDataset(image_dir, data_dir, train=True, transform=transform)
-    testset = ImageDataset(image_dir, data_dir, train=False, transform=transform)
-
+    trainset = ImageDataset(image_dir, data_dir, train=True, transform=transform, sampling=sampling)
+    testset = ImageDataset(image_dir, data_dir, train=False, transform=transform, sampling=sampling)
+    
+#     print(len(trainset))
+#     print(len(testset))
+    
     train_loader = torch.utils.data.DataLoader(trainset, batch_size=batch_size, num_workers=num_workers, shuffle=True, pin_memory=True)
     test_loader = torch.utils.data.DataLoader(testset, batch_size=batch_size, num_workers=num_workers, shuffle=False, pin_memory=True)
     
@@ -170,7 +184,7 @@ def load_aggregate_travel_behavior(file, unique_ct=None):
     return data
 
 
-def load_demo(data_dir):
+def load_demo(data_dir, norm='minmax'):
 
     demo_df = pd.read_csv(data_dir+"demo_tract.csv")
     demo_df['census_tract'] = '17_'+demo_df['COUNTYA'].astype(str)+'_'+demo_df['TRACTA'].astype(str)
@@ -178,8 +192,11 @@ def load_demo(data_dir):
     for d in ['tot_population','pct25_34yrs','pct35_50yrs','pctover65yrs',
              'pctwhite_alone','pct_nonwhite','pctblack_alone',
              'pct_col_grad','avg_tt_to_work','inc_per_capita']:
-        demo_df[d] = demo_df[d]/demo_df[d].max()
-
+        if norm == 'minmax':
+            demo_df[d] = demo_df[d]/demo_df[d].max()
+        elif norm == 'standard':
+            demo_df[d] = (demo_df[d]-demo_df[d].mean())/demo_df[d].std()
+            
     demo_np = demo_df[['tot_population','pct25_34yrs','pct35_50yrs','pctover65yrs',
              'pctwhite_alone','pct_nonwhite','pctblack_alone',
              'pct_col_grad','avg_tt_to_work','inc_per_capita']].to_numpy()

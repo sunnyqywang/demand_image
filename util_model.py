@@ -17,9 +17,21 @@ def get_layers(model: torch.nn.Module):
                 flatt_children.append(get_layers(child))
     return flatt_children
     
-def my_loss(out_image, out_demo, data, census_data, factor=20):
+def my_loss(out_image, out_demo, data, census_data, factor=1, return_components=False):
     reconstruct_loss = torch.mean((out_image - data)**2)
     regression_loss = torch.mean((out_demo - census_data)**2)
-    # print(reconstruct_loss, regression_loss)
-    return reconstruct_loss + regression_loss * factor
+#     print(reconstruct_loss, regression_loss)
+    if return_components:
+        return reconstruct_loss, regression_loss
+    else:
+        return reconstruct_loss + regression_loss * factor
 
+def adv_loss(out_image, out_demo, out_demo_adv, data, census_data, factor=10, return_components=False):
+    reconstruct_loss = torch.mean((out_image - data)**2)
+    regression_loss = torch.mean((out_demo - census_data)**2)
+    adv_loss = torch.mean(torch.abs((out_demo * out_demo_adv).sum(-1)))
+#     print(reconstruct_loss.item(), regression_loss.item(), adv_loss.item())
+    if return_components:
+        return reconstruct_loss, regression_loss, adv_loss
+    else:
+        return reconstruct_loss + regression_loss + adv_loss

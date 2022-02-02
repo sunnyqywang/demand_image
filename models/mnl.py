@@ -33,10 +33,11 @@ class MNL(nn.Module):
 
 
 class MNL2(nn.Module):
-    def __init__(self, n_alts, dim_embed, dim_demo, dim_hidden=128):
+    def __init__(self, n_alts, dim_embed, dim_demo, dropout, dim_hidden=128):
         super(MNL2, self).__init__()
         self.dim_embed = dim_embed
         self.dim_demo = dim_demo
+        self.dropout = nn.Dropout(p=dropout)
         
 #         self.bn_e = nn.BatchNorm1d(dim_embed)
         self.bn_d = nn.BatchNorm1d(dim_demo)
@@ -61,7 +62,7 @@ class MNL2(nn.Module):
         demo = self.bn_d(demo)
 #         embedding = self.bn_e(embedding)
         
-        embedding = F.relu(self.fc_embedding1(embedding))
+        embedding = self.dropout(F.relu(self.fc_embedding1(embedding)))
         embedding = self.fc_embedding2(embedding)
         
         demo = F.relu(self.fc_demo1(demo))

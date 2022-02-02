@@ -102,6 +102,7 @@ def test(epoch, model, criterion, test_loader, run_config, writer, device, logge
         logger.info('Test {}'.format(epoch))
 
     model.eval()
+    model = model.to(device)
     return_images = []
     return_demo = []
 
@@ -131,8 +132,7 @@ def test(epoch, model, criterion, test_loader, run_config, writer, device, logge
         loss_meter.update(loss_, num)
 #         print(loss_meter.avg)
         if return_output:
-            return_images.append(out_image.detach().cpu().numpy())
-            return_demo.append(out_demo.detach().cpu().numpy())
+            return_images.append(out_image.detach().cpu())
 
 #     logger.info('Epoch {} Loss {:.4f} Accuracy {:.4f}'.format(
 #         epoch, loss_meter.avg, accuracy))
@@ -155,9 +155,8 @@ def test(epoch, model, criterion, test_loader, run_config, writer, device, logge
             writer.add_histogram(name, param, global_step)
 
     if return_output:
-        return_images = np.vstack(return_images)
-        return_demo = np.vstack(return_demo)
-        return return_images, return_demo
+        return_images = torch.cat(return_images, dim=0)
+        return return_images
     else:
-        return
+        return loss_meter.avg
     
