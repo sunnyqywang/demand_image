@@ -57,7 +57,8 @@ def train(epoch, model, optimizer, criterion, train_loader, model_regularizer, r
         loss.backward()
 
         optimizer.step()
-
+        scheduler.step()
+        
         num = data.size(0)
 
         loss_ = loss.item()

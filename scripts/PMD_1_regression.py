@@ -168,7 +168,7 @@ if __name__ == "__main__":
                 ref2 = ref1
                 ref1 = loss_
 
-        with open(out_dir+args.normalization[0]+'_'+args.model_code+".csv", "a") as f:
+        with open(out_dir+args.sampling[0]+'_'+args.model_code+".csv", "a") as f:
             f.write("%s,%s,%s,%s,%.4f,%.5f,%.1f,%d,%.4f,%.4f,%.4f,%.4f\n" % \
                 (args.model_run_date, args.model_type, args.zoomlevel, "MNL2", lr, wd, do, 
                  best_epoch, best, best_test, best_train_acc, best_test_acc))
