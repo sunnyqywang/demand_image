@@ -9,7 +9,7 @@ class Autoencoder(nn.Module):
         
         self.encoder = config['encoder']
         self.decoder = config['decoder']
-        self.fc1 = nn.Linear(2048*config['model_config']['output_dim']**2, 512)
+        self.fc1 = nn.Linear(config['model_config']['output_dim']**2*2048, 512)
         self.fc2 = nn.Linear(512, 128)
         self.fc3 = nn.Linear(128, config['model_config']['num_demo_vars'])
         if config['data_config']['demo_norm'] == 'minmax':
@@ -17,12 +17,14 @@ class Autoencoder(nn.Module):
         else:
             self.demo_out = nn.BatchNorm1d(config['model_config']['num_demo_vars'])
             
-    def forward(self, x):
-        xp = self.encoder(x) 
-        xd = self.demo_out(self.fc3(F.relu(self.fc2(F.relu(self.fc1(xp.view(len(xp), -1)))))))
-        xp = self.decoder(xp)
+    def forward(self, x, xp=None):
+        if xp is None:
+            xp = self.encoder(x) 
         
-        return xp, xd
+        xd = self.demo_out(self.fc3(F.relu(self.fc2(F.relu(self.fc1(xp.view(len(xp), -1)))))))
+        x_dec = self.decoder(xp)
+        
+        return x_dec, xd
 
 class Autoencoder_raw(nn.Module):
     def __init__(self, config):

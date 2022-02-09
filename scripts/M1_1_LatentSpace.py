@@ -9,7 +9,7 @@ import pandas as pd
 import pickle as pkl
 import torch
 
-from dataloader import get_loader, image_loader, load_demo
+from dataloader import image_loader, load_demo
 from autoencoder import Autoencoder
 from M1_util_train_test import load_model, train, test, AverageMeter
 from util_model import my_loss
@@ -56,9 +56,10 @@ if __name__ == "__main__":
     model.load_state_dict(saved['model_state_dict']);
 
     model = model.to(device)
+    model.eval()
     
     train_loader, test_loader = image_loader(image_dir+args.zoomlevel+"/", data_dir, optim_config['batch_size'], run_config['num_workers'], 
-                                         data_config['image_size'], 
+                                         data_config['image_size'], data_version=args.data_version,
                                          sampling=args.sampling, recalculate_normalize=False)
 
     

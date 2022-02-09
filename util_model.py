@@ -1,6 +1,31 @@
+import sys
+sys.path.append("models/")
+import importlib
 import pandas as pd
 import torch
 
+
+def load_model(script, model, config):
+    module = importlib.import_module(script)
+    Network = getattr(module, model)
+    return Network(config)
+
+class AverageMeter(object):
+    def __init__(self):
+        self.reset()
+
+    def reset(self):
+        self.val = 0
+        self.avg = 0
+        self.sum = 0
+        self.count = 0
+
+    def update(self, val, num):
+        self.val = val
+        self.sum += val * num
+        self.count += num
+        self.avg = self.sum / self.count
+        
 def get_layers(model: torch.nn.Module):
     # get layers from model!
     children = list(model.children())

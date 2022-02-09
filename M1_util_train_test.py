@@ -35,7 +35,7 @@ def train(epoch, model, optimizer, criterion, train_loader, model_regularizer, r
     loss_meter = AverageMeter()
     accuracy_meter = AverageMeter()
     start = time.time()
-
+    
     for step, (image_list, data) in enumerate(train_loader):
         
         if run_config['tensorboard'] and step == 0:
@@ -57,7 +57,6 @@ def train(epoch, model, optimizer, criterion, train_loader, model_regularizer, r
         loss.backward()
 
         optimizer.step()
-        scheduler.step()
         
         num = data.size(0)
 
@@ -132,7 +131,6 @@ def test(epoch, model, criterion, test_loader, model_regularizer, run_config, wr
 #         print(torch.min(data))
         
         loss = criterion(out_image, out_demo, data, census_data, factor=run_config['weight'])
-       
         loss_ = loss.item()
 #         print(loss_)
         num = data.size(0)
@@ -167,5 +165,5 @@ def test(epoch, model, criterion, test_loader, model_regularizer, run_config, wr
         return_demo = np.vstack(return_demo)
         return return_images, return_demo
     else:
-        return
+        return loss_meter.avg
     

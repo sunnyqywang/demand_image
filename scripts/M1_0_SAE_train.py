@@ -1,17 +1,20 @@
 import sys
 sys.path.append("models/")
-from setup import out_dir, data_dir, image_dir, model_dir, parse_args, configuration
+from setup import proj_dir, out_dir, data_dir, image_dir, model_dir, parse_args, configuration
 
 import os
 from datetime import datetime
 import logging
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
 import numpy as np
 import random
 import glob
 import pandas as pd
 import torch
 
-from dataloader import get_loader, image_loader, load_demo
+from dataloader import image_loader, load_demo
 from autoencoder import Autoencoder
 from M1_util_train_test import load_model, train, test, AverageMeter
 from util_model import my_loss
@@ -21,9 +24,9 @@ if __name__ == "__main__":
     writer = None
     
     logging.basicConfig(
-    format='[%(asctime)s %(name)s %(levelname)s] - %(message)s',
-    datefmt='%Y/%m/%d %H:%M:%S',
-    level=logging.DEBUG)
+        format='[%(asctime)s %(name)s %(levelname)s] - %(message)s',
+        datefmt='%Y/%m/%d %H:%M:%S',
+        level=logging.DEBUG)
     logger = logging.getLogger(__name__)
     
     args = parse_args()
@@ -44,8 +47,8 @@ if __name__ == "__main__":
     # data loaders
     demo_cs, demo_np = load_demo(data_dir, norm=args.normalization)
     train_loader, test_loader = image_loader(image_dir+args.zoomlevel+"/", data_dir, optim_config['batch_size'], 
-                                         run_config['num_workers'], 
-                                         data_config['image_size'], sampling=args.sampling, 
+                                         run_config['num_workers'],
+                                         data_config['image_size'], data_version=args.data_version, sampling=args.sampling, 
                                          recalculate_normalize=False)
     
     criterion = my_loss
@@ -88,17 +91,21 @@ if __name__ == "__main__":
 
     ref1 = 0
     ref2 = 0
-
+    
+    train_loss_list = []
+    test_loss_list = []
+    train_flag = True
+    
     for epoch in range(optim_config['epochs']):
 
         loss_ = train(epoch, model, optimizer, criterion, train_loader, (demo_cs,demo_np), run_config,
              writer, device, logger=logger)
+        train_loss_list.append(loss_)
 
-        scheduler.step()
-
-        test(epoch, model, criterion, test_loader, (demo_cs,demo_np), run_config,
+        test_loss_ = test(epoch, model, criterion, test_loader, (demo_cs,demo_np), run_config,
                         writer, device, logger, return_output=False)
-
+        test_loss_list.append(test_loss_)
+        
         if epoch % 5 == 0:
             if epoch > 50:
                 if (np.abs(loss_ - ref1)/ref1<ref1*0.01) & (np.abs(loss_ - ref2)/ref2<ref2*0.01):
@@ -106,6 +113,7 @@ if __name__ == "__main__":
                     break
                 if (ref1 < loss_) & (ref1 < ref2):
                     print("Diverging. stop.")
+                    train_flag = False
                     break
                 if loss_ < best:
                     best = loss_
@@ -120,7 +128,8 @@ if __name__ == "__main__":
             if (config['run_config']['save']) & (best_epoch==epoch):
                 torch.save({'epoch': epoch,
                     'model_state_dict': model.state_dict(),
-                    'optimizer_state_dict': optimizer.state_dict()},
+                    'optimizer_state_dict': optimizer.state_dict(),
+                    'config': config},
                     model_dir+"SAE_"+args.zoomlevel+"_"+str(model_config['output_dim']**2*2048)+"_"+
                     args.model_run_date+"_"+str(epoch)+".pt")
 
@@ -134,7 +143,17 @@ if __name__ == "__main__":
             if e != best_epoch:
                 os.remove(f)
 
+    fig, ax = plt.subplots(figsize=(4,3))
+    ax.plot(train_loss_list, color='cornflowerblue', label='Train')
+    ax.plot(test_loss_list, color='sandybrown', label='Test')
+    ax.set_xlabel("Epoch")
+    ax.set_ylabel("Loss")
+    ax.set_ylim([0, 1.1*np.max(train_loss_list+test_loss_list)])
+    ax.legend()
+    fig.savefig(out_dir+"training_plots/SAE_"+args.zoomlevel+"_"+str(model_config['output_dim']**2*2048)+"_"+
+                                  args.model_run_date+".png", bbox_inches='tight')
 
+    model.eval()
     loss_meter_1 = AverageMeter()
     loss_meter_2 = AverageMeter()
 
@@ -190,5 +209,37 @@ if __name__ == "__main__":
     print(best_1, best_2)
     
     with open(out_dir+"SAE_train.csv", "a") as f:
-        f.write("%s,%s,%d,%s,%s,%d,%.4f,%.4f,%.4f,%.4f\n" % (args.model_run_date, args.zoomlevel, model_config['output_dim']**2*2048, args.sampling, args.normalization, best_epoch, best_1, best_2, best_test_1, best_test_2))
-    
+        f.write("%s,%s,%d,%s,%s,%d,%.4f,%.4f,%.4f,%.4f,%d\n" % (args.model_run_date, args.zoomlevel, model_config['output_dim']**2*2048, args.sampling, args.normalization, best_epoch, best_1, best_2, best_test_1, best_test_2, train_flag))
+
+    # Save Embeddings
+    ct = []
+    encoder_output = []
+    im = []
+
+    for step, data in enumerate(train_loader):
+        data1 = data[1].to(device)
+        ct += [s[s.rindex("/")+1: s.rindex("_")]for s in data[0]]
+        encoder_output += [encoder(data1).cpu().detach().numpy()]
+        im += data[0]
+        if step % 10 == 0:
+            print(step, end='\t')
+
+    for step, data in enumerate(test_loader):
+        data1 = data[1].to(device)
+        ct += [s[s.rindex("/")+1: s.rindex("_")]for s in data[0]]
+        encoder_output += [encoder(data1).cpu().detach().numpy()]
+        im += data[0]
+        if step % 10 == 0:
+            print(step, end='\t')
+
+    encoder_output = np.vstack(encoder_output)    
+
+#     print(encoder_output.shape)
+    encoder_output = encoder_output.reshape(len(encoder_output), -1)
+
+    with open(proj_dir+"latent_space/"+args.model_type+"_"+args.zoomlevel+"_"+str(args.output_dim**2*2048)+"_"+
+                           args.model_run_date+".pkl", "wb") as f:
+        pkl.dump(encoder_output, f)
+        pkl.dump(im, f)
+        pkl.dump(ct, f)
+
