@@ -33,23 +33,24 @@ class MNL(nn.Module):
 
 
 class MNL2(nn.Module):
-    def __init__(self, n_alts, dim_embed, dim_demo, dropout, dim_hidden=128):
+    def __init__(self, n_alts, dim_embed, dim_demo):
         super(MNL2, self).__init__()
         self.dim_embed = dim_embed
         self.dim_demo = dim_demo
-        self.dropout = nn.Dropout(p=dropout)
+#         self.dropout = nn.Dropout(p=dropout)
         
 #         self.bn_e = nn.BatchNorm1d(dim_embed)
-        self.bn_d = nn.BatchNorm1d(dim_demo)
+#         self.bn_d = nn.BatchNorm1d(dim_demo)
 #         self.bn = nn.BatchNorm1d(dim_embed+dim_demo)
     
-        self.fc_embedding1 = nn.Linear(dim_embed, dim_hidden)
-        self.fc_embedding2 = nn.Linear(dim_hidden, dim_demo)
+#         self.fc_embedding1 = nn.Linear(dim_embed, dim_hidden)
+#         self.fc_embedding2 = nn.Linear(dim_hidden, dim_demo)
 
-        self.fc_demo1 = nn.Linear(dim_demo, dim_demo)
-        self.fc_demo2 = nn.Linear(dim_demo, dim_demo)
+#         self.fc_demo1 = nn.Linear(dim_demo, dim_demo)
+#         self.fc_demo2 = nn.Linear(dim_demo, dim_demo)
 
-        self.mnl = nn.Linear(2*dim_demo, n_alts)
+        self.mnl_demo = nn.Linear(dim_demo, n_alts)
+        self.mnl_embedding = nn.Linear(dim_embed, n_alts)
         
     def forward(self, x):
         
@@ -59,16 +60,17 @@ class MNL2(nn.Module):
         demo = x[:, :self.dim_demo]
         embedding = x[:, self.dim_demo:]
         
-        demo = self.bn_d(demo)
+#         demo = self.bn_d(demo)
 #         embedding = self.bn_e(embedding)
         
-        embedding = self.dropout(F.relu(self.fc_embedding1(embedding)))
-        embedding = self.fc_embedding2(embedding)
+#         embedding = self.dropout(F.relu(self.fc_embedding1(embedding)))
+#         embedding = self.fc_embedding2(embedding)
         
-        demo = F.relu(self.fc_demo1(demo))
-        demo = self.fc_demo2(demo)
+#         demo = F.relu(self.fc_demo1(demo))
+#         demo = self.fc_demo2(demo)
         
-        V = self.mnl(torch.concat([demo, embedding], dim=1))
-        
+        V = self.mnl_demo(demo) + self.mnl_embedding(embedding)
+#         V = self.mnl(demo)
+    
         return V
     

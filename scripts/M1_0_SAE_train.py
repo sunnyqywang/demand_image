@@ -12,7 +12,9 @@ import numpy as np
 import random
 import glob
 import pandas as pd
+import pickle as pkl
 import torch
+from torch.utils.tensorboard import SummaryWriter
 
 from dataloader import image_loader, load_demo
 from autoencoder import Autoencoder
@@ -20,9 +22,7 @@ from M1_util_train_test import load_model, train, test, AverageMeter
 from util_model import my_loss
 
 if __name__ == "__main__":
-    # tensorboard not set up
-    writer = None
-    
+
     logging.basicConfig(
         format='[%(asctime)s %(name)s %(levelname)s] - %(message)s',
         datefmt='%Y/%m/%d %H:%M:%S',
@@ -35,6 +35,10 @@ if __name__ == "__main__":
     optim_config = config['optim_config']
     data_config = config['data_config']
     model_config = config['model_config']
+    
+    # tensorboard 
+    writer = SummaryWriter(proj_dir+'tensorboard/runs/'+args.model_type+"_"+args.zoomlevel+"_"+str(args.output_dim**2*2048)+"_"+
+                           args.model_run_date+"/")
     
     variable_names = ['tot_population','pct25_34yrs','pct35_50yrs','pctover65yrs',
              'pctwhite_alone','pct_nonwhite','pctblack_alone',
@@ -106,9 +110,12 @@ if __name__ == "__main__":
                         writer, device, logger, return_output=False)
         test_loss_list.append(test_loss_)
         
+        writer.add_scalar("Loss/Train", loss_)
+        writer.add_scalar("Loss/Test", test_loss_)
+	
         if epoch % 5 == 0:
             if epoch > 50:
-                if (np.abs(loss_ - ref1)/ref1<ref1*0.01) & (np.abs(loss_ - ref2)/ref2<ref2*0.01):
+                if (np.abs(loss_ - ref1)/ref1<0.0001) & (np.abs(loss_ - ref2)/ref2<0.0001):
                     print("Early stopping at epoch", epoch)
                     break
                 if (ref1 < loss_) & (ref1 < ref2):
@@ -242,4 +249,6 @@ if __name__ == "__main__":
         pkl.dump(encoder_output, f)
         pkl.dump(im, f)
         pkl.dump(ct, f)
-
+    
+    print()
+    
