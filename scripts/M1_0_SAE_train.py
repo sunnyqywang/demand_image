@@ -20,6 +20,8 @@ from dataloader import image_loader, load_demo
 from autoencoder import Autoencoder
 from M1_util_train_test import load_model, train, test, AverageMeter
 from util_model import my_loss
+from exp_version import get_hp_from_version_code
+
 
 if __name__ == "__main__":
 
@@ -35,9 +37,10 @@ if __name__ == "__main__":
     optim_config = config['optim_config']
     data_config = config['data_config']
     model_config = config['model_config']
-    
+    weight, lr, wd = get_hp_from_version_code(args.v1, args.v2)
+
     # tensorboard 
-    writer = SummaryWriter(proj_dir+'tensorboard/runs/'+args.model_type+"_"+args.zoomlevel+"_"+str(args.output_dim**2*2048)+"_"+
+    writer = SummaryWriter(proj_dir+'tensorboard/runs/'+args.model_type+"_"+args.zoomlevel+"_"+str(args.output_dim**2*2048)+"_"+args.v1+"_"+str(args.v2)+"_"+
                            args.model_run_date+"/")
     
     variable_names = ['tot_population','pct25_34yrs','pct35_50yrs','pctover65yrs',
@@ -115,7 +118,7 @@ if __name__ == "__main__":
 	
         if epoch % 5 == 0:
             if epoch > 50:
-                if (np.abs(loss_ - ref1)/ref1<0.0001) & (np.abs(loss_ - ref2)/ref2<0.0001):
+                if (np.abs(loss_-ref1)/ref1<0) & (np.abs(loss_-ref2)/ref2<0):
                     print("Early stopping at epoch", epoch)
                     break
                 if (ref1 < loss_) & (ref1 < ref2):
@@ -137,12 +140,12 @@ if __name__ == "__main__":
                     'model_state_dict': model.state_dict(),
                     'optimizer_state_dict': optimizer.state_dict(),
                     'config': config},
-                    model_dir+"SAE_"+args.zoomlevel+"_"+str(model_config['output_dim']**2*2048)+"_"+
+                    model_dir+"SAE_"+args.zoomlevel+"_"+str(model_config['output_dim']**2*2048)+"_"+args.v1+"_"+str(args.v2)+"_"+
                     args.model_run_date+"_"+str(epoch)+".pt")
 
 
     if config['run_config']['save']:
-        files = glob.glob(model_dir+"SAE_"+args.zoomlevel+"_"+str(model_config['output_dim']**2*2048)+"_"+
+        files = glob.glob(model_dir+"SAE_"+args.zoomlevel+"_"+str(model_config['output_dim']**2*2048)+"_"+args.v1+"_"+str(args.v2)+"_"+
                                   args.model_run_date+"_*.pt")
 
         for f in files:
@@ -155,9 +158,9 @@ if __name__ == "__main__":
     ax.plot(test_loss_list, color='sandybrown', label='Test')
     ax.set_xlabel("Epoch")
     ax.set_ylabel("Loss")
-    ax.set_ylim([0, 1.1*np.max(train_loss_list+test_loss_list)])
+#     ax.set_ylim([0.9*np.min(train_loss_list+test_loss_list), 1.1*np.max(train_loss_list+test_loss_list)])
     ax.legend()
-    fig.savefig(out_dir+"training_plots/SAE_"+args.zoomlevel+"_"+str(model_config['output_dim']**2*2048)+"_"+
+    fig.savefig(out_dir+"training_plots/SAE_"+args.zoomlevel+"_"+str(model_config['output_dim']**2*2048)+"_"+args.v1+"_"+str(args.v2)+"_"+
                                   args.model_run_date+".png", bbox_inches='tight')
 
     model.eval()
@@ -216,7 +219,7 @@ if __name__ == "__main__":
     print(best_1, best_2)
     
     with open(out_dir+"SAE_train.csv", "a") as f:
-        f.write("%s,%s,%d,%s,%s,%d,%.4f,%.4f,%.4f,%.4f,%d\n" % (args.model_run_date, args.zoomlevel, model_config['output_dim']**2*2048, args.sampling, args.normalization, best_epoch, best_1, best_2, best_test_1, best_test_2, train_flag))
+        f.write("%s,%d,%.2E,%.2E,%s,%s,%d,%s,%s,%d,%.4f,%.4f,%.4f,%.4f,%d\n" % (args.v1,args.v2,lr,wd,args.model_run_date, args.zoomlevel, model_config['output_dim']**2*2048, args.sampling, args.normalization, best_epoch, best_1, best_2, best_test_1, best_test_2, train_flag))
 
     # Save Embeddings
     ct = []
@@ -244,8 +247,7 @@ if __name__ == "__main__":
 #     print(encoder_output.shape)
     encoder_output = encoder_output.reshape(len(encoder_output), -1)
 
-    with open(proj_dir+"latent_space/"+args.model_type+"_"+args.zoomlevel+"_"+str(args.output_dim**2*2048)+"_"+
-                           args.model_run_date+".pkl", "wb") as f:
+    with open(proj_dir+"latent_space/"+args.model_type+"_"+args.zoomlevel+"_"+str(args.output_dim**2*2048)+"_"+args.v1+"_"+str(args.v2)+"_"+args.model_run_date+".pkl", "wb") as f:
         pkl.dump(encoder_output, f)
         pkl.dump(im, f)
         pkl.dump(ct, f)

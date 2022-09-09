@@ -25,8 +25,7 @@ if __name__ == "__main__":
     device = torch.device(args.device if torch.cuda.is_available() else "cpu")
 
     # Check one model exists for this config
-    model_path = glob.glob(model_dir+args.model_type+"_"+args.zoomlevel+"_"+str(args.output_dim**2*2048)+"_"+
-                           args.model_run_date+"_*.pt")
+    model_path = glob.glob(model_dir+"SAE_"+args.zoomlevel+"_"+str(model_config['output_dim']**2*2048)+"_"+args.v1+"_"+str(args.v2)+"_"+args.model_run_date+"_*.pt")    
     #
     if len(model_path) == 1:
         saved = torch.load(model_path[0])
@@ -34,8 +33,7 @@ if __name__ == "__main__":
     else:
         print("Error. More than one model or no model exists.")
         print(model_path)
-        print(model_dir+args.model_type+"_"+args.zoomlevel+"_"+str(args.output_dim**2*2048)+"_"+
-                           args.model_run_date+"_*.pt")
+        print(model_dir+"SAE_"+args.zoomlevel+"_"+str(model_config['output_dim']**2*2048)+"_"+args.v1+"_"+str(args.v2)+"_"+args.model_run_date+"_*.pt")
         
     # load model
     config['model_config']['input_shape'] = (1,3,data_config['image_size'],data_config['image_size'])
@@ -64,14 +62,12 @@ if __name__ == "__main__":
 
     
     # Check if embeddings have been saved
-    files = glob.glob(proj_dir+"latent_space/"+args.model_type+"_"+args.zoomlevel+"_"+str(args.output_dim**2*2048)+"_"+
-                           args.model_run_date+".pkl")
+    files = glob.glob(proj_dir+"latent_space/"+args.model_type+"_"+args.zoomlevel+"_"+str(args.output_dim**2*2048)+"_"+args.v1+"_"+str(args.v2)+"_"+args.model_run_date+".pkl")
 
     if len(files) == 1:
-        print("Loading Existing Embedding", proj_dir+"latent_space/"+args.model_type+"_"+args.zoomlevel+"_"+str(args.output_dim**2*2048)+"_"+
-                           args.model_run_date+".pkl")
-        with open(proj_dir+"latent_space/"+args.model_type+"_"+args.zoomlevel+"_"+str(args.output_dim**2*2048)+"_"+
-                           args.model_run_date+".pkl", "rb") as f:
+        print("Loading Existing Embedding", proj_dir+"latent_space/"+args.model_type+"_"+args.zoomlevel+"_"+str(args.output_dim**2*2048)+"_"+args.v1+"_"+str(args.v2)+"_"+args.model_run_date+".pkl")
+    with open(proj_dir+"latent_space/"+args.model_type+"_"+args.zoomlevel+"_"+str(args.output_dim**2*2048)+"_"+args.v1+"_"+str(args.v2)+"_"+args.model_run_date+".pkl", "wb") as f:
+
             encoder_output = pkl.load(f)
             im = pkl.load(f)
             ct = pkl.load(f)
@@ -107,8 +103,8 @@ if __name__ == "__main__":
 
         # Save Embeddings
 
-        with open(proj_dir+"latent_space/"+args.model_type+"_"+args.zoomlevel+"_"+str(args.output_dim**2*2048)+"_"+
-                               args.model_run_date+".pkl", "wb") as f:
+    with open(proj_dir+"latent_space/"+args.model_type+"_"+args.zoomlevel+"_"+str(args.output_dim**2*2048)+"_"+args.v1+"_"+str(args.v2)+"_"+args.model_run_date+".pkl", "wb") as f:
+
             pkl.dump(encoder_output, f)
             pkl.dump(im, f)
             pkl.dump(ct, f)

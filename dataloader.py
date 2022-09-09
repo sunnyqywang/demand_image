@@ -192,7 +192,7 @@ class SurveyDataset(Dataset):
     def __getitem__(self, idx):
         return tuple((self.x[idx], self.y[idx]))
 
-def train_test_split(x, data_version):
+def train_test_split_data(x, data_version):
     
     data = pd.read_csv(data_dir+"census_tracts_filtered-"+data_version+".csv")
     data = pd.merge(x, data, on='geoid')
@@ -213,12 +213,12 @@ def load_aggregate_travel_behavior(file, data_version):
     df_pivot.rename(columns={'wtperfin_all':'trpgen',1:'active',2:'auto',3:'mas',4:'pt'}, inplace=True)
     df_pivot['geoid'] = df_pivot['state_fips_1'].astype(str)+"_"+df_pivot['county_fips_1'].astype(str)+"_"+df_pivot['tract_fips_1'].astype(str)
     df_pivot.sort_values(by='geoid',inplace=True)
-    # turn trip generation units to 1k trips
+    # turn trip generation units to 1k trips`
     df_pivot['trpgen'] = df_pivot['trpgen']/1000
     
     census_area = pd.read_csv(data_dir+"demo_tract.csv")[['geoid','area']]
     df_pivot = df_pivot.merge(census_area, on='geoid')
-    data = train_test_split(df_pivot, data_version)
+    data = train_test_split_data(df_pivot, data_version)
     
     return data
 
