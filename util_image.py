@@ -53,10 +53,10 @@ def image_transform(img, crop_size, recalculate_normalize=False):
     
     return img_transformed
     
-def inverse_transform(img, grayscale=False):
+def inverse_transform(img, mean=[], std=[], grayscale=False):
     inv_normalize = torchvision.transforms.Normalize(
-        mean=[-0.3733/0.2173, -0.3991/0.2055, -0.3711/0.2143],
-        std=[1/0.2173, 1/0.2055, 1/0.2143]
+        mean=[-m/x for m,x in zip(mean, std)],
+        std=[1/x for x in std]
     )
     
     img = torch.Tensor(img)

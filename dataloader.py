@@ -16,7 +16,7 @@ from setup import data_dir
 
 class ImageDataset(Dataset):
 
-    def __init__(self, image_dir, data_dir, train, data_version, transform=None, sampling='clustered'):
+    def __init__(self, image_dir, data_dir, train, data_version, transform=None, sampling='clustered', image_type='png', augment=None):
         """
         Args:
             image_dir (string): Directory with all the images.
@@ -25,6 +25,8 @@ class ImageDataset(Dataset):
         """
         self.image_dir = image_dir
         self.transform = transform
+        self.augment = augment
+        
         data = pd.read_csv(data_dir+"census_tracts_filtered-"+data_version+".csv")
         self.image_list = []
 
@@ -37,19 +39,25 @@ class ImageDataset(Dataset):
             tracts = [str(s)+'_'+str(c)+'_'+str(t) for (s,c,t) in zip(data['state_fips'], data['county_fips'], data['tract_fips'])]
 
             for f in tracts:
-                self.image_list += glob.glob(image_dir+f+"_*.png")
+                self.image_list += glob.glob(image_dir+f+"_*."+image_type)
         
         if sampling == 'stratified':
             for f in data['geoid']:
-                im = glob.glob(image_dir+f+"_*.png")
+                im = glob.glob(image_dir+f+"_*."+image_type)
                 im = sorted(im)
                 n = int(len(im) * 0.1)
                 if train:
                     self.image_list += im[:-n]
                 else:
                     self.image_list += im[-n:]
+                    
         print(len(self.image_list), "images in dataset")
         
+        self.num_unique = len(self.image_list)
+        
+        if augment:
+            self.image_list = self.image_list + self.image_list + self.image_list
+            
     def __len__(self):
         return len(self.image_list)
 
@@ -63,13 +71,21 @@ class ImageDataset(Dataset):
         if self.transform:
             sample = self.transform(sample)
             
+        if self.augment:
+            if idx>self.num_unique*2:
+                rotate = torchvision.transforms.RandomRotation(25)
+                sample = rotate(sample)
+            elif idx > self.num_unique:
+                hflip = torchvision.transforms.RandomHorizontalFlip(1)
+                sample = hflip(sample)
+                
         return self.image_list[idx], sample
 
-def image_loader(image_dir, data_dir, batch_size, num_workers, image_size, data_version, sampling='clustered', recalculate_normalize=False):
+def image_loader(image_dir, data_dir, batch_size, num_workers, image_size, data_version, sampling='clustered', recalculate_normalize=False, image_type='png', augment=None, norm=1):
     
     if recalculate_normalize:
         transform = torchvision.transforms.Compose([torchvision.transforms.ToTensor()])       
-        trainset = ImageDataset(image_dir, data_dir, train=False, transform=transform, sampling=sampling)
+        trainset = ImageDataset(image_dir, data_dir, train=False, transform=transform, sampling=sampling, data_version=data_version)
         
         all_images = trainset[0][1].reshape(3, -1)
         for i in range(1,len(trainset)):
@@ -80,17 +96,49 @@ def image_loader(image_dir, data_dir, batch_size, num_workers, image_size, data_
         print("Image Mean: ", mean)
         print("Image Std:", std)
     else:
-        mean = [0.3733, 0.3991, 0.3711]
-        std = [0.2173, 0.2055, 0.2143]
-        
-    transform = torchvision.transforms.Compose([
-        torchvision.transforms.ToTensor(),
-        torchvision.transforms.CenterCrop(image_size),
-        torchvision.transforms.Normalize(mean, std)
-    ])
+        if 'zoom13' in image_dir:
+            mean = [0.3733, 0.3991, 0.3711]
+            std = [0.2173, 0.2055, 0.2143]
+        else:
+            mean = [0.3816, 0.4169, 0.3868]
+            std = [0.1960, 0.1848, 0.2052]
+            
+            
+    if norm == 1:
+        transform = torchvision.transforms.Compose([
+            torchvision.transforms.ToTensor(),
+            torchvision.transforms.CenterCrop(224),
+            torchvision.transforms.Resize(image_size),
+            torchvision.transforms.Normalize(mean, std),
+#             torchvision.transforms.RandomHorizontalFlip(),
+#             torchvision.transforms.CenterCrop(224),
+#             torchvision.transforms.Resize(image_size),
+    #         torchvision.transforms.ToTensor()
+        ])
+    elif norm == 0:
+        transform = torchvision.transforms.Compose([
+            torchvision.transforms.ToTensor(),
+#             torchvision.transforms.CenterCrop(image_size),
+#             torchvision.transforms.Normalize(mean, std),
+#             torchvision.transforms.RandomHorizontalFlip(),
+            torchvision.transforms.CenterCrop(224),
+            torchvision.transforms.Resize(image_size),
+    #         torchvision.transforms.ToTensor()
+        ])
+    elif norm == 2:
+        transform = torchvision.transforms.Compose([
+            torchvision.transforms.ToTensor(),
+            torchvision.transforms.CenterCrop(224),
+            torchvision.transforms.Resize(image_size),
+            torchvision.transforms.Normalize([0.5,0.5,0.5], [0.5,0.5,0.5]),
+#             torchvision.transforms.RandomHorizontalFlip(),
+#             torchvision.transforms.CenterCrop(224),
+#             torchvision.transforms.Resize(image_size),
+    #         torchvision.transforms.ToTensor()
+        ])
 
-    trainset = ImageDataset(image_dir, data_dir, train=True, data_version=data_version, transform=transform, sampling=sampling)
-    testset = ImageDataset(image_dir, data_dir, train=False, data_version=data_version, transform=transform, sampling=sampling)
+    trainset = ImageDataset(image_dir, data_dir, train=True, data_version=data_version, transform=transform, sampling=sampling, image_type=image_type, augment=augment)
+    testset = ImageDataset(image_dir, data_dir, train=False, data_version=data_version, transform=transform, sampling=sampling, image_type=image_type, augment=augment)
     
     train_loader = torch.utils.data.DataLoader(trainset, batch_size=batch_size, num_workers=num_workers, shuffle=True, pin_memory=True)
     test_loader = torch.utils.data.DataLoader(testset, batch_size=batch_size, num_workers=num_workers, shuffle=False, pin_memory=True)
@@ -152,7 +200,7 @@ def image_loader_DR(image_dir, data_dir, batch_size, num_workers, image_size, ta
     
     if recalculate_normalize:
         transform = torchvision.transforms.Compose([torchvision.transforms.ToTensor()])       
-        trainset = ImageDataset(image_dir, data_dir, train=False, transform=transform, sampling=sampling)
+        trainset = ImageDataset(image_dir, data_dir, train=False, transform=transform, sampling=sampling, data_version=data_version)
         
         all_images = trainset[0][1].reshape(3, -1)
         for i in range(1,len(trainset)):

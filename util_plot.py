@@ -45,18 +45,18 @@ import torch
 #         vis.images(images, 10, 2)
 
 
-# def plot_vae_samples(vae, device, visdom_session):
-#     vis = visdom_session
-#     x = torch.zeros([1,3,224,224])
-#     x = x.to(device)
-#     for i in range(10):
-#         images = []
-#         for rr in range(100):
-#             # get loc from the model
-#             sample_loc_i = vae.model(x)
-#             img = sample_loc_i[0].view(3, 224, 224).cpu().data.numpy()
-#             images.append(img)
-#         vis.images(images, 10, 2)
+def plot_vae_samples(vae, device, visdom_session):
+    vis = visdom_session
+    x = torch.zeros([1,3,224,224])
+    x = x.to(device)
+    for i in range(10):
+        images = []
+        for rr in range(100):
+            # get loc from the model
+            sample_loc_i = vae.model(x)
+            img = sample_loc_i[0].view(3, 224, 224).cpu().data.numpy()
+            images.append(img)
+        vis.images(images, 10, 2)
 
         
 def plot_latent_class(z_loc, classes, class_type='autoshare'):
