@@ -27,9 +27,20 @@ class Generator(nn.Module):
         super(Generator, self).__init__()
         
         if config['model_config']['model_class'] == 'vae':
-            nz = config['model_config']['latent_dim']//2
+            nz = config['model_config']['latent_dim']//2 
         else:
             nz = config['model_config']['latent_dim']
+        
+        if config['data_config']['demo_channels'] > 0:
+            self.conditional = True
+            self.mapping = nn.Sequential(
+                nn.Linear(config['data_config']['demo_channels'], 64),
+                nn.ReLU(True),
+                nn.Linear(64, nz)
+            )
+            nz = nz * 2
+        else:
+            self.conditional = False
             
         ngf = config['model_config']['base_channels']
         nc = config['data_config']['color_channels']
@@ -60,15 +71,19 @@ class Generator(nn.Module):
         
         self.apply(weights_init)
 
-    def forward(self, x):
-        x = self.main(x)
+    def forward(self, x, demo=None):
+        if demo is not None:
+            demo = self.mapping(demo)
+            x = torch.cat((x, demo), dim=1)
+                
+        x_ = self.main(x)
         
         if self.im_norm == 0:
-            x = torch.sigmoid(x)
+            x_ = torch.sigmoid(x_)
         elif self.im_norm == 2:
-            x = torch.tanh(x)
+            x_ = torch.tanh(x_)
 
-        return x
+        return x_
     
     
 class Discriminator(nn.Module):
@@ -76,8 +91,11 @@ class Discriminator(nn.Module):
         super(Discriminator, self).__init__()
         
         ndf = config['model_config']['base_channels']
-        nc = config['data_config']['color_channels']
         self.model_class = config['model_config']['model_class']
+        if self.model_class == 'gan':
+            nc = config['data_config']['color_channels'] + config['data_config']['demo_channels']
+        else:
+            nc = config['data_config']['color_channels']
         nz = config['model_config']['latent_dim']
 
         self.main = nn.Sequential(
@@ -101,10 +119,11 @@ class Discriminator(nn.Module):
 #             nn.Linear(ndf * 8 * 4 * 4, nz)
         )
         
-        self.classification = nn.Sequential(
-            nn.Conv2d(nz, 1, 1, 1, 0, bias=False),
-            nn.Sigmoid()
-        )
+        if self.model_class == 'gan':
+            self.classification = nn.Sequential(
+                nn.Conv2d(nz, 1, 1, 1, 0, bias=False),
+                nn.Sigmoid()
+            )
         
         self.apply(weights_init)
 
@@ -113,7 +132,7 @@ class Discriminator(nn.Module):
         x = self.main(x)
         
         if self.model_class == 'gan':
-            x = self.classification(x)
+            x = torch.squeeze(self.classification(x))
     
         return x
 

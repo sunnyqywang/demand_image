@@ -15,6 +15,7 @@ def parse_args(s=None):
     parser.add_argument('--zoomlevel', type=str, default='zoom13')
     parser.add_argument('--image_size', type=int, default=64)
     parser.add_argument('--color_channels', type=int, default=3)
+    parser.add_argument('--demo_channels', type=int, default=0)    
     parser.add_argument('--data_version', type=str, default='1571')
 
     parser.add_argument('--output_dim', type=int, default=1)
@@ -161,6 +162,7 @@ def dcgan_config(args):
     data_config = OrderedDict([
         ('image_size', args.image_size),
         ('color_channels', args.color_channels),
+        ('demo_channels', args.demo_channels),
         ('im_norm', args.im_norm)
     ])
 
@@ -279,8 +281,7 @@ def adv_loss(out_image, out_demo, out_demo_adv, data, census_data, factor=10, re
         return reconstruct_loss, regression_loss, adv_loss
     else:
         return reconstruct_loss + regression_loss + adv_loss
-    
-    
+
 def log_cosh_loss(y_pred: torch.Tensor, y_true: torch.Tensor, reduction='mean') -> torch.Tensor:
     def _log_cosh(x: torch.Tensor) -> torch.Tensor:
         return x + torch.nn.functional.softplus(-2. * x) - math.log(2.0)

@@ -36,6 +36,9 @@ def get_hp_from_version_code(v1, v2):
     elif v2 == 5:
         lr = 5e-4
         wd = 1e-4
+    elif v2 == 6:
+        lr = 1e-4
+        wd = 0
     else:
         raise Exception("Lr Wd version code error")
     

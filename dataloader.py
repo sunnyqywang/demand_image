@@ -16,7 +16,7 @@ from setup import data_dir
 
 class ImageDataset(Dataset):
 
-    def __init__(self, image_dir, data_dir, train, data_version, transform=None, sampling='clustered', image_type='png', augment=None):
+    def __init__(self, image_dir, data_dir, train, data_version, transform=None, sampling='clustered', image_type='png', augment=None, demo=False):
         """
         Args:
             image_dir (string): Directory with all the images.
@@ -58,6 +58,10 @@ class ImageDataset(Dataset):
         if augment:
             self.image_list = self.image_list + self.image_list + self.image_list
             
+        self.demo = demo
+        if demo:
+            self.demo_np, self.demo_cs = load_demo(data_dir, norm=3)
+
     def __len__(self):
         return len(self.image_list)
 
@@ -78,10 +82,18 @@ class ImageDataset(Dataset):
             elif idx > self.num_unique:
                 hflip = torchvision.transforms.RandomHorizontalFlip(1)
                 sample = hflip(sample)
-                
-        return self.image_list[idx], sample
+        
+        if self.demo:
+            census_index = self.demo_cs.index(img_name[img_name.rfind('/')+1:img_name.rfind('_')])
+            census_data = self.demo_np[census_index]
+            return self.image_list[idx], sample, census_data
+        else:
+            return self.image_list[idx], sample
 
-def image_loader(image_dir, data_dir, batch_size, num_workers, image_size, data_version, sampling='clustered', recalculate_normalize=False, image_type='png', augment=None, norm=1):
+        
+        
+        
+def image_loader(image_dir, data_dir, batch_size, num_workers, image_size, data_version, sampling='clustered', recalculate_normalize=False, image_type='png', augment=None, norm=1, demo=False, return_dataset=False):
     
     if recalculate_normalize:
         transform = torchvision.transforms.Compose([torchvision.transforms.ToTensor()])       
@@ -137,98 +149,18 @@ def image_loader(image_dir, data_dir, batch_size, num_workers, image_size, data_
     #         torchvision.transforms.ToTensor()
         ])
 
-    trainset = ImageDataset(image_dir, data_dir, train=True, data_version=data_version, transform=transform, sampling=sampling, image_type=image_type, augment=augment)
-    testset = ImageDataset(image_dir, data_dir, train=False, data_version=data_version, transform=transform, sampling=sampling, image_type=image_type, augment=augment)
+    trainset = ImageDataset(image_dir, data_dir, train=True, data_version=data_version, transform=transform, sampling=sampling, image_type=image_type, augment=augment, demo=demo)
+    testset = ImageDataset(image_dir, data_dir, train=False, data_version=data_version, transform=transform, sampling=sampling, image_type=image_type, augment=augment, demo=demo)
     
-    train_loader = torch.utils.data.DataLoader(trainset, batch_size=batch_size, num_workers=num_workers, shuffle=True, pin_memory=True)
-    test_loader = torch.utils.data.DataLoader(testset, batch_size=batch_size, num_workers=num_workers, shuffle=False, pin_memory=True)
-    
-    return train_loader, test_loader
+    if not return_dataset:
+        train_loader = torch.utils.data.DataLoader(trainset, batch_size=batch_size, num_workers=num_workers, shuffle=True, pin_memory=True)
+        test_loader = torch.utils.data.DataLoader(testset, batch_size=batch_size, num_workers=num_workers, shuffle=False, pin_memory=True)
 
-
-
-class ImageDataset_DR(Dataset):
-
-    def __init__(self, image_dir, data_dir, train, target, data_version, individual=False, transform=None, num_images_per_tract=10):
-        """
-        Args:
-            image_dir (string): Directory with all the images.
-            transform (callable, optional): Optional transform to be applied
-                on a sample.
-        """
-        self.image_dir = image_dir
-        self.transform = transform
-        self.num_images_per_tract = num_images_per_tract
-        self.individual = individual
-        
-        data = pd.read_csv(data_dir+"census_tracts_filtered-"+data_version+".csv")
-        # target variables y
-        file = "origin_trip_behavior.csv"
-        df_pivot = load_aggregate_travel_behavior(file)
-
-        train_test_index = df_pivot['train_test'].astype(bool)
-        yy = torch.tensor(df_pivot[target].to_numpy(), dtype=torch.float)
-        
-        if train:
-            data = data[data['train_test']==0]
-            self.y = yy[~train_test_index]
-        else:
-            data = data[data['train_test']==1]
-            self.y = yy[train_test_index]
-              
-        self.tracts = [str(s)+'_'+str(c)+'_'+str(t) for (s,c,t) in zip(data['state_fips'], data['county_fips'], data['tract_fips'])]
-            
-    def __len__(self):
-        return len(self.tracts)
-
-    def __getitem__(self, idx):
-        if torch.is_tensor(idx):
-            idx = idx.tolist()
-
-        ret_list = []
-        for i in range(self.num_images_per_tract):
-            img_name = os.path.join(self.image_dir, self.tracts[idx]+"_"+str(i)+".png")
-            sample = cv2.imread(img_name)
-
-            if self.transform:
-                sample = self.transform(sample)
-            ret_list.append(sample)
-            
-        return torch.stack(ret_list), self.y[idx]
-
-def image_loader_DR(image_dir, data_dir, batch_size, num_workers, image_size, target, data_version, num_images_per_tract=10, recalculate_normalize=False):
-    
-    if recalculate_normalize:
-        transform = torchvision.transforms.Compose([torchvision.transforms.ToTensor()])       
-        trainset = ImageDataset(image_dir, data_dir, train=False, transform=transform, sampling=sampling, data_version=data_version)
-        
-        all_images = trainset[0][1].reshape(3, -1)
-        for i in range(1,len(trainset)):
-            all_images = torch.cat((all_images, trainset[i][1].reshape(3, -1)), dim=1)
-        mean = torch.mean(all_images, axis=1)
-        std = torch.std(all_images, axis=1)
-
-        print("Image Mean: ", mean)
-        print("Image Std:", std)
+        return train_loader, test_loader
     else:
-        mean = [0.3733, 0.3991, 0.3711]
-        std = [0.2173, 0.2055, 0.2143]
         
-    transform = torchvision.transforms.Compose([
-        torchvision.transforms.ToTensor(),
-        torchvision.transforms.CenterCrop(image_size),
-        torchvision.transforms.Normalize(mean, std)
-    ])
-
-    trainset = ImageDataset_DR(image_dir, data_dir, data_version=data_version, train=True, target=target, transform=transform, num_images_per_tract=num_images_per_tract)
-    testset = ImageDataset_DR(image_dir, data_dir, data_version=data_version, train=False, target=target, transform=transform, num_images_per_tract=num_images_per_tract)
+        return trainset, testset
     
-    train_loader = torch.utils.data.DataLoader(trainset, batch_size=batch_size, num_workers=num_workers, shuffle=True, pin_memory=True)
-    test_loader = torch.utils.data.DataLoader(testset, batch_size=batch_size, num_workers=num_workers, shuffle=False, pin_memory=True)
-    
-    return train_loader, test_loader
-
-
 class SurveyDataset(Dataset):
     def __init__(self, x, y):
         self.x = x
@@ -271,19 +203,41 @@ def load_aggregate_travel_behavior(file, data_version):
     return data
 
 
-def load_demo(data_dir, norm='minmax'):
+def load_demo(data_dir, norm=2):
 
     demo_df = pd.read_csv(data_dir+"demo_tract.csv")
+    demo_df['pop_density'] = demo_df['tot_population'] / demo_df['area']
 
+    if norm == 3:
+        high_inc = np.percentile(demo_df['inc_per_capita'].to_numpy(), 75)
+        high_dens = np.percentile(demo_df['pop_density'].to_numpy(), 75)
+        senior = np.percentile(demo_df['pctover65yrs'].to_numpy(), 75)
+        youngad = np.percentile(demo_df['pct25_34yrs'].to_numpy(), 75)
+        high_edu = np.percentile(demo_df['pct_col_grad'].to_numpy(), 75)
+        
+        demo_df['high_inc'] = (demo_df['inc_per_capita'] > high_inc).astype(np.float64)
+        demo_df['high_dens'] = (demo_df['pop_density'] > high_dens).astype(np.float64)
+        demo_df['senior'] = (demo_df['pctover65yrs'] > senior).astype(np.float64)
+        demo_df['youngad'] = (demo_df['pct25_34yrs'] > youngad).astype(np.float64)
+        demo_df['high_edu'] = (demo_df['pct_col_grad'] > high_edu).astype(np.float64)
+    
+        return demo_df[['high_inc', 'high_dens', 'senior', 'youngad', 'high_edu']].to_numpy(), demo_df['geoid'].tolist()
+    
     for d in ['tot_population','pct25_34yrs','pct35_50yrs','pctover65yrs',
              'pctwhite_alone','pct_nonwhite','pctblack_alone',
              'pct_col_grad','avg_tt_to_work','inc_per_capita']:
-        if norm == 'minmax':
+        if (norm == 0) or (norm == 'minmax'):
             demo_df[d] = demo_df[d]/demo_df[d].max()
-        elif norm == 'standard':
+        elif (norm == 1) or (norm == 'norm'):
             demo_df[d] = (demo_df[d]-demo_df[d].mean())/demo_df[d].std()
-            
-    demo_np = demo_df[['tot_population','pct25_34yrs','pct35_50yrs','pctover65yrs',
+        elif norm == 2:
+            if d[:3] == 'pct':
+                demo_df[d] = (demo_df[d] - 0.5)/0.5
+            else:
+                demo_df[d] = demo_df[d]/demo_df[d].max()
+                demo_df[d] = (demo_df[d] - 0.5)/0.5
+                
+    demo_np = demo_df[['pop_density','pct25_34yrs','pct35_50yrs','pctover65yrs',
              'pctwhite_alone','pct_nonwhite','pctblack_alone',
              'pct_col_grad','avg_tt_to_work','inc_per_capita']].to_numpy()
     demo_cs = demo_df['geoid'].tolist()
