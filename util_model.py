@@ -9,7 +9,7 @@ import argparse
 import math
 
 def parse_args(s=None):
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(fromfile_prefix_chars='@')
     
     parser.add_argument('--model_run_date', type=str, required=True)
     parser.add_argument('--zoomlevel', type=str, default='zoom13')
@@ -26,8 +26,10 @@ def parse_args(s=None):
     parser.add_argument('--tensorboard', type=bool, default=False)
     parser.add_argument('--save', type=bool, default=True)
 
+    # Model task
     parser.add_argument('--model_class', type=str, default='AE')
-    parser.add_argument('--model_type', type=str, default='dcgan')
+    # Model architecture
+    parser.add_argument('--model_arch', type=str, default='dcgan')
     parser.add_argument('--sampling', type=str, default='stratified')
     parser.add_argument('--normalization', type=str, default='minmax')
     parser.add_argument('--device', type=str, default='cuda:1')
@@ -48,14 +50,13 @@ def parse_args(s=None):
     else:
         args = parser.parse_args()
     
-    if args.model_type == 'SAE':
+    if args.model_class == 'SAE':
         args.load_model_name = 'Autoencoder'
-    elif args.model_type == 'AE':
+    elif args.model_class == 'AE':
         args.load_model_name = 'Autoencoder_raw'
-    elif args.model_type == 'SAE_Adv':
+    elif args.model_class == 'SAE_Adv':
         args.load_model_name = 'Autoencoder_adv'
        
-
     #     args.lr_list = [float(a) for a in args.lr_list.split(',')]
     #     args.wd_list = [float(a) for a in args.wd_list.split(',')]
     #     args.do_list = [float(a) for a in args.do_list.split(',')]
@@ -145,16 +146,16 @@ def dcgan_config(args):
     
     model_config = OrderedDict([
         ('model_class', args.model_class),
-        ('arch', 'resnet'),
+        ('arch', args.model_arch),
         ('latent_dim', args.latent_dim),
-        ('layers', [3,4,6,3]),# args['layers'])
+        ('layers', [3,4,6,3]),
         ('base_channels', 64),
         ('loss_func', args.loss_func)
     ])
 
     optim_config = OrderedDict([
         ('epochs', args.epochs),
-        ('batch_size', 64), #args['batch_size']),
+        ('batch_size', 16),
         ('base_lr', args.base_lr),
         ('weight_decay', args.weight_decay),
     ])
@@ -169,7 +170,7 @@ def dcgan_config(args):
     run_config = OrderedDict([
         ('outdir', out_dir),
         ('save', args.save),
-        ('num_workers', 8), #args['num_workers']),
+        ('num_workers', 8),
         ('tensorboard', args.tensorboard),
     ])
 
@@ -184,10 +185,6 @@ def dcgan_config(args):
 
 
 def resnext_config(args):
-    if args.latent_dim == -1:
-        ld = args.output_dim**2*2048
-    else:
-        ld = args.latent_dim
 
     model_config = OrderedDict([
         ('model_class', args.model_class),
@@ -195,7 +192,7 @@ def resnext_config(args):
         ('base_channels', 64),
         ('cardinality', 1),
         ('output_dim', args.output_dim),
-        ('latent_dim', ld)
+        ('latent_dim', args.latent_dim)
     ])
 
     optim_config = OrderedDict([
@@ -265,12 +262,12 @@ def get_layers(model: torch.nn.Module):
     
 def my_loss(out_image, out_demo, data, census_data, factor=1, factorr=1, return_components=False):
     reconstruct_loss = torch.mean((out_image - data)**2)
-    regression_loss = torch.mean((out_demo - census_data)**2)
+    regression_loss = torch.mean((out_demo - census_data)**2, dim=0)
 #     print(reconstruct_loss, regression_loss)
     if return_components:
-        return reconstruct_loss, regression_loss
+        return reconstruct_loss.detach().cpu(), regression_loss.detach().cpu()
     else:
-        return reconstruct_loss * factorr + regression_loss * factor
+        return reconstruct_loss.detach().cpu() * factorr + torch.mean(regression_loss).detach().cpu() * factor
 
 def adv_loss(out_image, out_demo, out_demo_adv, data, census_data, factor=10, return_components=False):
     reconstruct_loss = torch.mean((out_image - data)**2)

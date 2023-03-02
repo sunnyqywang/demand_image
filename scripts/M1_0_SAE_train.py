@@ -32,6 +32,9 @@ if __name__ == "__main__":
     logger = logging.getLogger(__name__)
     
     args = parse_args()
+
+    device = torch.device(args.device if torch.cuda.is_available() else "cpu")    
+
     config = configuration(args)
     run_config = config['run_config']
     optim_config = config['optim_config']

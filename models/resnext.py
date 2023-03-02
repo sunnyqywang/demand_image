@@ -14,7 +14,7 @@ def initialize_weights(m):
 
 class BottleneckBlock(nn.Module):
     # factor of bottleneck
-    expansion = 4
+    expansion = 2
 
     def __init__(self, in_channels, out_channels, stride, cardinality):
         super(BottleneckBlock, self).__init__()
@@ -63,21 +63,13 @@ class BottleneckBlock(nn.Module):
             self.shortcut.add_module('bn', nn.BatchNorm2d(out_channels))  # BN
 
     def forward(self, x):
-        # y = F.relu(self.bn1(self.conv1(x)))
-        # print(torch.cuda.memory_allocated("cuda:1")/1024//1024, torch.cuda.memory_reserved("cuda:1")/1024//1024)
+        
         y = self.conv1(x)
-        # print(torch.cuda.memory_allocated("cuda:1")/1024//1024, torch.cuda.memory_reserved("cuda:1")/1024//1024)
         y = self.bn1(y)
-        # print(torch.cuda.memory_allocated("cuda:1")/1024//1024, torch.cuda.memory_reserved("cuda:1")/1024//1024)
         y = F.relu(y)
-        # print(torch.cuda.memory_allocated("cuda:1")/1024//1024, torch.cuda.memory_reserved("cuda:1")/1024//1024)
         y = self.conv2(y)
-        # print(torch.cuda.memory_allocated("cuda:1")/1024//1024, torch.cuda.memory_reserved("cuda:1")/1024//1024)
         y = self.bn2(y)
-        # print(torch.cuda.memory_allocated("cuda:1")/1024//1024, torch.cuda.memory_reserved("cuda:1")/1024//1024)
         y = F.relu(y)
-        # y = F.relu(self.bn2(self.conv2(y)))
-        # y = self.bn3(self.conv3(y))  # not apply ReLU
         y = self.conv3(y)
         y = self.bn3(y)
 
@@ -88,7 +80,7 @@ class BottleneckBlock(nn.Module):
     
 class DeconvBottleneckBlock(nn.Module):
     # factor of bottleneck
-    expansion = 4
+    expansion = 2
 
     def __init__(self, in_channels, out_channels, stride, cardinality):
         super(DeconvBottleneckBlock, self).__init__()
@@ -149,13 +141,16 @@ class DeconvBottleneckBlock(nn.Module):
 class Encoder(nn.Module):
     def __init__(self, config):
         super(Encoder, self).__init__()
+            
+        if "input_shape" in config['model_config'].keys():
+            input_shape = config['model_config']['input_shape']
+        else:
+            input_shape = (1, config['data_config']['color_channels'], config['data_config']['image_size'], config['data_config']['image_size']) 
 
-        input_shape = config['input_shape']
-
-        base_channels = config['base_channels']
+        base_channels = config['model_config']['base_channels']
         # depth = config['depth']
-        self.cardinality = config['cardinality']
-        self.output_dim = config['output_dim']
+        self.cardinality = config['model_config']['cardinality']
+        self.output_dim = config['model_config']['output_dim']
 
         # 2: initial conv layer + last fc layer
         # 9: 3 layers/block * 3 stages
@@ -187,12 +182,15 @@ class Encoder(nn.Module):
         self.stage4 = self._make_stage(n_channels[3], n_channels[4], 3, stride=2)
 
         # compute conv feature size
-        #with torch.no_grad():
-        #    self.feature_size = self.forward(torch.zeros(*input_shape)).shape
-        #    print('Encoder', self.feature_size)
-        #    print(self.feature_size)
-
-        # self.fc = nn.Linear(reduce(lambda x,y: x*y, self.feature_size[1:]), self.n_features)
+        self.reduce = False
+        with torch.no_grad():
+            self.feature_size = self.forward(torch.zeros(*input_shape)).shape
+#             print('Encoder', self.feature_size)
+#             print(self.feature_size)
+        
+        if config['model_config']['latent_dim'] != self.output_dim * self.output_dim * block.expansion * 512:
+            self.reduce = True        
+            self.fc = nn.Linear(reduce(lambda x,y: x*y, self.feature_size[1:]), config['model_config']['latent_dim'])
 
         # initialize weights
         self.apply(initialize_weights)
@@ -220,6 +218,7 @@ class Encoder(nn.Module):
         # print(torch.cuda.memory_allocated("cuda:1")/1024//1024, torch.cuda.memory_reserved("cuda:1")/1024//1024)
         # x = F.relu(self.bn(self.conv(x)))
         x = self.conv(x)
+#         print(x.shape)
         # print(torch.cuda.memory_allocated("cuda:1")/1024//1024, torch.cuda.memory_reserved("cuda:1")/1024//1024)
         x  = self.bn(x)
         # print(torch.cuda.memory_allocated("cuda:1")/1024//1024, torch.cuda.memory_reserved("cuda:1")/1024//1024)
@@ -227,39 +226,40 @@ class Encoder(nn.Module):
         # print(torch.cuda.memory_allocated("cuda:1")/1024//1024, torch.cuda.memory_reserved("cuda:1")/1024//1024)
         x = self.maxpool(x)
 
-        # print(x.shape)
+#         print(x.shape)
         x = self.stage1(x)
-        # print(x.shape)
+#         print(x.shape)
         x = self.stage2(x)
-        # print(x.shape) 
+#         print(x.shape) 
         x = self.stage3(x)
-        # print(x.shape)
+#         print(x.shape)
         x = self.stage4(x)
-        # print(x.shape)
+#         print(x.shape)
         x = F.adaptive_avg_pool2d(x, output_size=self.output_dim)
-        # print(x.shape)
+#         print(x.shape)
         return x
 
     def forward(self, x):
         x = self._forward_conv(x)
-        # x = x.view(x.size(0), -1)
-        # x = self.fc(x)
+        x = x.view(x.size(0), -1)
+        try:
+            if self.reduce:
+                x = self.fc(x)
+        except:
+            pass
         return x   
 
 class Decoder(nn.Module):
     def __init__(self, config):
         super(Decoder, self).__init__()
 
-        self.input_shape = config['input_shape']
-
-        base_channels = config['base_channels']
-        # depth = config['depth']
-        self.cardinality = config['cardinality']
-        self.conv_shape = config['conv_shape']
-        # self.hidden_dim = config['hidden_dim']
-        # self.conv_dim = reduce(lambda x,y: x*y, self.input_shape)
-        # self.fc = nn.Linear(self.hidden_dim, self.conv_dim) 
-
+        self.output_dim = config['model_config']['output_dim']
+        base_channels = config['model_config']['base_channels']
+        self.cardinality = config['model_config']['cardinality']
+        self.conv_shape = [config['data_config']['image_size']//32, config['data_config']['image_size']//32]
+        self.im_norm = config['data_config']['im_norm']
+        self.expand = False
+    
         # 2: initial conv layer + last fc layer
         # 9: 3 layers/block * 3 stages
         # --> 9 * blocks/stage = layers
@@ -275,21 +275,28 @@ class Decoder(nn.Module):
         ]
         n_channels.reverse()
 
-        self.conv = nn.ConvTranspose2d(
-            n_channels[-1],
-            config['output_channels'],
-            kernel_size=6,
-            stride=2,
-            padding=2,
-            bias=False)
-        # self.bn = nn.BatchNorm2d(base_channels)
-        self.bn = nn.BatchNorm2d(config['output_channels'])
-
         self.stage1 = self._make_stage(n_channels[0], n_channels[1], 3, stride=2)
         self.stage2 = self._make_stage(n_channels[1], n_channels[2], 6, stride=2)
         self.stage3 = self._make_stage(n_channels[2], n_channels[3], 4, stride=2)
         self.stage4 = self._make_stage(n_channels[3], n_channels[4], 3, stride=1)
 
+        self.conv = nn.ConvTranspose2d(
+            n_channels[-1],
+            config['data_config']['color_channels'],
+            kernel_size=6,
+            stride=2,
+            padding=2,
+            bias=False)
+
+        if config['model_config']['latent_dim'] != self.output_dim * self.output_dim * block.expansion * 512:
+            if "input_shape" in config['model_config'].keys():
+                self.input_shape = config['model_config']['input_shape']
+            else:
+                self.input_shape = (1, 2048, config['model_config']['output_dim'], config['model_config']['output_dim'])
+
+            self.expand = True
+            self.conv_dim = reduce(lambda x,y: x*y, self.input_shape)
+            self.fc = nn.Linear(config['model_config']['latent_dim'], self.conv_dim) 
 
         # initialize weights
         self.apply(initialize_weights)
@@ -320,42 +327,46 @@ class Decoder(nn.Module):
         return stage
 
     def _forward_conv(self, x):
+#         print(x.shape)
         x = self.stage1(x)
-        # print(x.shape)
+#         print(x.shape)
         x = self.stage2(x)
-        # print(x.shape)
+#         print(x.shape)
         x = self.stage3(x)
-        # print(x.shape)
+#         print(x.shape)
         x = self.stage4(x)
-        # print(x.shape)
+#         print(x.shape)
         return x
 
     def forward(self, x):
+        
+        try:
+            if self.expand:
+                x = self.fc(x)
+        except:
+            pass
+        
+#         x = x.view(x.size(0), -1, self.output_dim, self.output_dim)
         conv_shape = self.input_shape
         conv_shape[0] = x.size(0)
         x = x.view(conv_shape)
+        
         x = F.interpolate(x, size=self.conv_shape, align_corners=False, mode='bilinear') 
+
         x = self._forward_conv(x)
         # x = F.relu(self.bn(self.conv(x)), inplace=True)
         x = F.interpolate(x, scale_factor=2, align_corners=False, mode='bilinear')
-        # print(x.shape)
         x = self.conv(x)
-        x = self.bn(x)
-        # print(x.shape)
-
+        try:
+            if self.im_norm == 0:
+                x = torch.sigmoid(x)
+            elif self.im_norm == 2:
+                x = torch.tanh(x)
+        except:
+            try:
+                # first DHM paper models has this batch normalization layer with im_norm being 1
+                x = self.bn(x)
+            except:
+                pass
+            
         return x
-
-class Autoencoder(nn.Module):
-    def __init__(self, encoder, decoder):
-        super(Autoencoder, self).__init__()
-        
-        self.encoder = encoder
-        self.decoder = decoder
-
-    def forward(self, x):
-        y = encoder(x)
-        # print(y.shape)
-        y = decoder(y)
-
-        return y
-
