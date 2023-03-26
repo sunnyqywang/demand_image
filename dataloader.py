@@ -12,8 +12,78 @@ import torchvision.transforms
 import cv2
 import os
 import glob
-from setup import data_dir
+import h5py
 
+from setup import data_dir
+import re
+
+def atoi(text):
+    return int(text) if text.isdigit() else text
+
+def natural_keys(text):
+    '''
+    alist.sort(key=natural_keys) sorts in human order
+    http://nedbatchelder.com/blog/200712/human_sorting.html
+    (See Toothy's implementation in the comments)
+    '''
+    return [ atoi(c) for c in re.split(r'(\d+)', text) ]
+
+class ImageHDF5(Dataset):
+    
+    def __init__(self, image_dir, data_dir, demo=False, train=True, transform=None):
+        super().__init__()
+        self.shuffle_unit = 4
+        self.transform = transform
+        self.train = train
+        self.demo = demo
+        
+        if train is None:
+            self.files = glob.glob(image_dir+"17_*.hdf5")
+            self.data_info = pd.read_csv(data_dir+"data_info.csv")
+            self.demo_step = 20
+            
+        elif train:
+            self.files = glob.glob(image_dir+"train_17_*.hdf5")
+            self.data_info = pd.read_csv(data_dir+"train_data_info.csv")
+            self.demo_step = 18
+            
+        else:
+            self.files = glob.glob(image_dir+"test_17_*.hdf5")
+            self.data_info = pd.read_csv(data_dir+"test_data_info.csv")
+            self.demo_step = 2
+            
+        self.files.sort(key=natural_keys)
+        
+        if demo:
+            self.demo_df, self.columns = load_demo_v2(data_dir)
+            temp = self.data_info.drop_duplicates(subset=['state','county','tract'])
+            self.demo_df = pd.merge(temp, self.demo_df, how='left', left_on=['state','county','tract'], right_on=['STATEFP','COUNTYFP','TRACTCE']).fillna(0)
+            self.demo_df = torch.tensor(self.demo_df[self.columns].to_numpy())
+            
+    def __len__(self):
+        return len(self.data_info) // self.shuffle_unit
+
+    def __getitem__(self, i):        
+        group_i = i//(2000//self.shuffle_unit)
+        f = h5py.File(self.files[group_i], 'r')['default']
+        
+        idx = i % (2000//self.shuffle_unit)
+        data = f[idx:idx+self.shuffle_unit]
+        
+        if self.transform:
+            data = self.transform(torch.tensor(data))
+        else:
+            data = torch.tensor(data)
+    
+        if self.demo:
+            demo_i = i // self.demo_step
+            demo = self.demo_df[demo_i,:]
+            demo = torch.tile(demo, (self.shuffle_unit,1))
+            
+            return i, data, demo
+        else:
+            return i, data
+        
 class ImageDataset(Dataset):
 
     def __init__(self, image_dir, data_dir, train, data_version, transform=None, sampling='clustered', image_type='png', augment=None, demo=-1):
@@ -32,9 +102,9 @@ class ImageDataset(Dataset):
 
         if sampling == 'clustered':
             if train:
-                data = data[data['train_test']==0]
+                data = data[data['train_test']!=0]
             else:
-                data = data[data['train_test']==1]
+                data = data[data['train_test']==0]
 
             tracts = [str(s)+'_'+str(c)+'_'+str(t) for (s,c,t) in zip(data['state_fips'], data['county_fips'], data['tract_fips'])]
 
@@ -59,7 +129,7 @@ class ImageDataset(Dataset):
             self.image_list = self.image_list + self.image_list + self.image_list
             
         self.demo = demo
-        if demo >= 0:
+        if demo > 0:
             self.demo_cs, self.demo_np = load_demo_v1(data_dir, norm=demo)
 #             print(self.demo_np.shape)
 
@@ -84,7 +154,7 @@ class ImageDataset(Dataset):
                 hflip = torchvision.transforms.RandomHorizontalFlip(1)
                 sample = hflip(sample)
         
-        if self.demo >= 0:
+        if self.demo > 0:
             census_index = self.demo_cs.index(img_name[img_name.rfind('/')+1:img_name.rfind('_')])
             census_data = self.demo_np[census_index]
             return self.image_list[idx], sample, census_data
@@ -203,34 +273,29 @@ def load_aggregate_travel_behavior(file, data_version):
     
     return data
 
-def load_demo_v2(data_dir, norm=2):
+def load_demo_v2(data_dir):
     
-    demo_df = pd.read_csv(data_dir+"EPA_SmartLocations_CensusTract.csv")
+    epa = pd.read_csv(data_dir+"EPA_SmartLocations_CensusTract_export.csv")
     
-    real_columns = ['AutoOwn0','AutoOwn1','AutoOwn2p','Workers','R_LowWageWk','R_MedWageWk','R_HiWageWk',
+    # log_tranform
+    epa['activity_density'] = np.log(epa['activity_density'])
+    
+    pm = pd.read_csv(data_dir+"PM2.5_Concentrations_2016_Illinois_Average_Annual.csv")
+    pm['ctfips'] = pm['ctfips'] % 1e6
+    pm['ctfips'] = pm['ctfips'].astype(int)
+    demo_df = pd.merge(epa, pm, left_on=['STATEFP','COUNTYFP','TRACTCE'], right_on=['statefips','countyfips','ctfips'])
 
-#     ['TotPop','CountHU','HH',
-#  'TotEmp','E5_Ret','E5_Off','E5_Ind','E5_Svc','E5_Ent',
-                     'E_LowWageWk','E_MedWageWk','E_HiWageWk',
-#  'roads','int_mm3','int_mm4','int_po3','int_po4','emp_transit_025','emp_transit_050',
-#  'D5AR','D5AE','D5BR','D5BE',
- 'NatWalkInd',
- 'D1a','D1b','D1c','D1c5_Ret','D1c5_Off','D1c5_Ind','D1c5_Svc','D1c5_Ent','D1d',
- 'D2a_JpHH','D3a','D3b','D4b025','D4b050']
-    
-    pct_columns = ['D5cr','D5ce','D5dr','D5de','D5cri','D5cei','D5dri','D5dei']
-
+    # normalize
+    real_columns = ['activity_density','auto_oriented','multi_modal','pedestrian_oriented','PM2.5']
     for c in real_columns:
         demo_df[c] = (demo_df[c] - demo_df[c].mean())/demo_df[c].std()
+    pct_columns = ['employment_entropy','pop_income_entropy','wrk_emp_balance']
     for c in pct_columns:
         demo_df[c] = (demo_df[c] - 0.5)/0.5
 
-    demo_cs = demo_df['geoid'].tolist()
+    columns = real_columns + pct_columns
     
-    demo_np = demo_df[['AutoOwn0','AutoOwn2p','R_LowWageWk','R_HiWageWk','E_LowWageWk','E_HiWageWk','D1a','D1b','D1c',
-                      'D2a_JpHH','D4b050','NatWalkInd']].to_numpy()
-    
-    return demo_cs, demo_np
+    return demo_df, columns
 
 def load_demo_v1(data_dir, norm=2):
 

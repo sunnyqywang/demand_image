@@ -69,8 +69,8 @@ class MobileNetV2(nn.Module):
         
         super(MobileNetV2, self).__init__()
         
-        n_class=config['data_config']['demo_channels']
-        input_size=config['data_config']['image_size']
+        n_class=config['condition_dim']
+        input_size=config['image_size']
         width_mult=1.
     
         block = InvertedResidual
@@ -109,8 +109,9 @@ class MobileNetV2(nn.Module):
         # building classifier
         self.classifier = nn.Linear(self.last_channel, n_class)
         
-        self.format = nn.Sigmoid()
-        
+#         self.format = nn.Sigmoid()
+        self.format = nn.Tanh()
+    
         self._initialize_weights()
 
     def forward(self, x):

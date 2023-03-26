@@ -1,8 +1,12 @@
+# conditional part not working, see csgan2 for conditional training
+# this script is used for unconditional training
+
 import os
 import sys
 import math
 import fire
 import json
+from datetime import datetime
 
 from tqdm import tqdm
 from math import floor, log2
@@ -46,6 +50,17 @@ import aim
 
 assert torch.cuda.is_available(), 'You need to have an Nvidia GPU with CUDA installed.'
 
+sys.path.append("../../")
+from dataloader import ImageDataset
+from setup import data_dir, image_dir
+
+# constants
+
+NUM_CORES = multiprocessing.cpu_count()
+EXTS = ['jpg', 'jpeg', 'png']
+
+class NanException(Exception):
+    pass
 
 class EMA():
     def __init__(self, beta):
@@ -202,19 +217,30 @@ def calc_pl_lengths(styles, images):
 
     return (pl_grads ** 2).sum(dim=2).mean(dim=1).sqrt()
 
-def noise(n, latent_dim, device):
-    return torch.randn(n, latent_dim).cuda(device)
+def noise(n, latent_dim, device, demo_batch=None):
+    if demo_batch is None:
+        return torch.randn(n, latent_dim).cuda(device)
+    else:
+        return torch.cat([torch.randn(n, latent_dim-demo_batch.shape[1]), demo_batch], dim=1).cuda(device)
+    
+def noise_list(n, layers, latent_dim, device, demo_batch=None):
+    return [(noise(n, latent_dim, device, demo_batch), layers)]
 
-def noise_list(n, layers, latent_dim, device):
-    return [(noise(n, latent_dim, device), layers)]
-
-def mixed_list(n, layers, latent_dim, device):
+def mixed_list(n, layers, latent_dim, device, demo_batch=None):
     tt = int(torch.rand(()).numpy() * layers)
-    return noise_list(n, tt, latent_dim, device) + noise_list(n, layers - tt, latent_dim, device)
+    return noise_list(n, tt, latent_dim, device, demo_batch) + noise_list(n, layers - tt, latent_dim, device, demo_batch)
 
-def latent_to_w(style_vectorizer, latent_descr):
-    return [(style_vectorizer(z), num_layers) for z, num_layers in latent_descr]
-
+def latent_to_w(style_vectorizer, latent_descr, demo_batch=None):
+    if demo_batch is None:
+        return [(style_vectorizer(z), num_layers) for z, num_layers in latent_descr]
+    else:
+        assert len(latent_descr) == len(demo_batch)
+        ret = []
+        for i in range(len(latent_descr)):
+            ret.append((torch.cat([style_vectorizer(latent_descr[i][0]), demo_batch[i]], dim=1).float(), latent_descr[i][1]))
+#         return [(torch.cat([style_vectorizer(z), demo], dim=1).float(), num_layers) for (z, num_layers),demo in zip(latent_descr,demo_batch)]
+        return ret
+    
 def image_noise(n, im_size, device):
     return torch.FloatTensor(n, im_size, im_size, 1).uniform_(0., 1.).cuda(device)
 
@@ -304,11 +330,16 @@ class EqualLinear(nn.Module):
         return F.linear(input, self.weight * self.lr_mul, bias=self.bias * self.lr_mul)
 
 class StyleVectorizer(nn.Module): ## mapping function z->w
-    def __init__(self, emb, depth, lr_mul = 0.1):
+    def __init__(self, emb, depth, lr_mul = 0.1, emb_out=None):
         super().__init__()
 
         layers = []
-        for i in range(depth):
+        for i in range(depth-1):
+            layers.extend([EqualLinear(emb, emb, lr_mul), leaky_relu()])
+
+        if emb_out is not None:
+            layers.extend([EqualLinear(emb, emb_out, lr_mul), leaky_relu()])
+        else:
             layers.extend([EqualLinear(emb, emb, lr_mul), leaky_relu()])
 
         self.net = nn.Sequential(*layers)
@@ -446,14 +477,16 @@ class DiscriminatorBlock(nn.Module):
         return x
 
 class Generator(nn.Module):
-    def __init__(self, image_size, latent_dim, network_capacity = 16, transparent = False, attn_layers = [], no_const = False, fmap_max = 512):
+    def __init__(self, image_size, latent_dim, network_capacity = 16, conditional = False, transparent = False, attn_layers = [], no_const = False, fmap_max = 512, *args, **kwargs):
         super().__init__()
         self.image_size = image_size
         self.latent_dim = latent_dim
         self.num_layers = int(log2(image_size) - 1)
 
         filters = [network_capacity * (2 ** (i + 1)) for i in range(self.num_layers)][::-1]
-
+#         if conditional:
+#             filters[0] = filters[0] + kwargs['demo_channels']
+            
         set_fmap_max = partial(min, fmap_max)
         filters = list(map(set_fmap_max, filters))
         init_channels = filters[0]
@@ -512,10 +545,13 @@ class Generator(nn.Module):
         return rgb
 
 class Discriminator(nn.Module):
-    def __init__(self, image_size, network_capacity = 16, fq_layers = [], fq_dict_size = 256, attn_layers = [], transparent = False, fmap_max = 512):
+    def __init__(self, image_size, conditional = False, network_capacity = 16, fq_layers = [], fq_dict_size = 256, attn_layers = [], transparent = False, fmap_max = 51, *args, **kwargs):
         super().__init__()
         num_layers = int(log2(image_size) - 1)
-        num_init_filters = 3 if not transparent else 4
+        if conditional:
+            num_init_filters = 3 + kwargs['demo_channels'] if not transparent else 4 + kwargs['demo_channels'] 
+        else:
+            num_init_filters = 3 if not transparent else 4
 
         blocks = []
         filters = [num_init_filters] + [(network_capacity * 4) * (2 ** i) for i in range(num_layers + 1)]
@@ -575,18 +611,24 @@ class Discriminator(nn.Module):
 
     
 class StyleGAN2(nn.Module):
-    def __init__(self, image_size, latent_dim = 512, fmap_max = 512, style_depth = 8, network_capacity = 16, transparent = False, fp16 = False, cl_reg = False, steps = 1, lr = 1e-4, ttur_mult = 2, fq_layers = [], fq_dict_size = 256, attn_layers = [], no_const = False, lr_mlp = 0.1, rank = 0):
+    def __init__(self, image_size, conditional = False, latent_dim = 512, fmap_max = 512, style_depth = 8, network_capacity = 16, transparent = False, fp16 = False, cl_reg = False, steps = 1, lr = 1e-4, ttur_mult = 2, fq_layers = [], fq_dict_size = 256, attn_layers = [], no_const = False, lr_mlp = 0.1, rank = 0, *args, **kwargs):
         super().__init__()
         self.lr = lr
         self.steps = steps
         self.ema_updater = EMA(0.995)
 
-        self.S = StyleVectorizer(latent_dim, style_depth, lr_mul = lr_mlp)
-        self.G = Generator(image_size, latent_dim, network_capacity, transparent = transparent, attn_layers = attn_layers, no_const = no_const, fmap_max = fmap_max)
-        self.D = Discriminator(image_size, network_capacity, fq_layers = fq_layers, fq_dict_size = fq_dict_size, attn_layers = attn_layers, transparent = transparent, fmap_max = fmap_max)
+        # v2 only
+        if conditional:
+            emb_out =  latent_dim - kwargs['demo_channels']
+        else:
+            emb_out = latent_dim
+            
+        self.S = StyleVectorizer(latent_dim, style_depth, lr_mul = lr_mlp, emb_out = emb_out)
+        self.G = Generator(image_size, latent_dim, network_capacity, conditional=conditional, transparent = transparent, attn_layers = attn_layers, no_const = no_const, fmap_max = fmap_max, *args, **kwargs)
+        self.D = Discriminator(image_size, conditional, network_capacity, fq_layers = fq_layers, fq_dict_size = fq_dict_size, attn_layers = attn_layers, transparent = transparent, fmap_max = fmap_max, *args, **kwargs)
 
-        self.SE = StyleVectorizer(latent_dim, style_depth, lr_mul = lr_mlp)
-        self.GE = Generator(image_size, latent_dim, network_capacity, transparent = transparent, attn_layers = attn_layers, no_const = no_const)
+        self.SE = StyleVectorizer(latent_dim, style_depth, lr_mul = lr_mlp, emb_out = emb_out)
+        self.GE = Generator(image_size, latent_dim, network_capacity, conditional=conditional, transparent = transparent, attn_layers = attn_layers, no_const = no_const, *args, **kwargs)
 
         self.D_cl = None
 
@@ -656,6 +698,7 @@ class Trainer():
         models_dir = 'models',
         base_dir = './',
         image_size = 128,
+        conditional = False,
         network_capacity = 16,
         fmap_max = 512,
         transparent = False,
@@ -707,8 +750,14 @@ class Trainer():
         self.fid_dir = base_dir / 'fid' / name
         self.config_path = self.models_dir / name / 'config.json'
         
+        print("Results directory:", self.results_dir / self.name)
+        print("Model directory:", self.models_dir / self.name)
+        
         assert log2(image_size).is_integer(), 'image size must be a power of 2 (64, 128, 256, 512, 1024)'
         self.image_size = image_size
+        self.conditional = conditional
+        if self.conditional:
+            self.demo_channels = kwargs['demo_channels']
         self.network_capacity = network_capacity
         self.fmap_max = fmap_max
         self.transparent = transparent
@@ -774,7 +823,10 @@ class Trainer():
 
         assert not (is_ddp and cl_reg), 'Contrastive loss regularization does not work well with multi GPUs yet'
         self.is_ddp = is_ddp
-        self.is_main = rank == 0
+        ## Changed to 1 by default since no multi-gpu processing is happening
+        ## Need to change back if multiple gpus are used.
+#         self.is_main = rank == 0
+        self.is_main = True
         self.rank = rank
         self.world_size = world_size
 
@@ -794,7 +846,7 @@ class Trainer():
         
     def init_GAN(self):
         args, kwargs = self.GAN_params
-        self.GAN = StyleGAN2(lr = self.lr, lr_mlp = self.lr_mlp, ttur_mult = self.ttur_mult, image_size = self.image_size, network_capacity = self.network_capacity, fmap_max = self.fmap_max, transparent = self.transparent, fq_layers = self.fq_layers, fq_dict_size = self.fq_dict_size, attn_layers = self.attn_layers, fp16 = self.fp16, cl_reg = self.cl_reg, no_const = self.no_const, rank = self.rank, *args, **kwargs)
+        self.GAN = StyleGAN2(lr = self.lr, lr_mlp = self.lr_mlp, ttur_mult = self.ttur_mult, image_size = self.image_size, conditional = self.conditional, network_capacity = self.network_capacity, fmap_max = self.fmap_max, transparent = self.transparent, fq_layers = self.fq_layers, fq_dict_size = self.fq_dict_size, attn_layers = self.attn_layers, fp16 = self.fp16, cl_reg = self.cl_reg, no_const = self.no_const, rank = self.rank, *args, **kwargs)
 
         if self.is_ddp:
             ddp_kwargs = {'device_ids': [self.rank]}
@@ -827,7 +879,15 @@ class Trainer():
         return {'image_size': self.image_size, 'network_capacity': self.network_capacity, 'lr_mlp': self.lr_mlp, 'transparent': self.transparent, 'fq_layers': self.fq_layers, 'fq_dict_size': self.fq_dict_size, 'attn_layers': self.attn_layers, 'no_const': self.no_const}
 
     def set_data_src(self, folder):
-        self.dataset = Dataset(folder, self.image_size, transparent = self.transparent, aug_prob = self.dataset_aug_prob)
+        
+#         self.dataset = Dataset(folder, self.image_size, transparent = self.transparent, aug_prob = self.dataset_aug_prob)
+        transform = transform = torchvision.transforms.Compose([
+            torchvision.transforms.ToTensor(),
+            torchvision.transforms.CenterCrop(224),
+            torchvision.transforms.Resize(self.image_size)])
+#             torchvision.transforms.Normalize([0.5,0.5,0.5], [0.5,0.5,0.5])])
+    
+        self.dataset = ImageDataset(folder, data_dir, train=True, data_version='1571', transform=transform, sampling='stratified', image_type='png', augment=None, demo=self.conditional)
         num_workers = num_workers = default(self.num_workers, NUM_CORES if not self.is_ddp else 0)
         sampler = DistributedSampler(self.dataset, rank=self.rank, num_replicas=self.world_size, shuffle=True) if self.is_ddp else None
         dataloader = data.DataLoader(self.dataset, num_workers = num_workers, batch_size = math.ceil(self.batch_size / self.world_size), sampler = sampler, shuffle = not self.is_ddp, drop_last = True, pin_memory = True)
@@ -886,6 +946,7 @@ class Trainer():
                     self.GAN.D_cl(generated_images.clone().detach(), accumulate=True)
 
             for i in range(self.gradient_accumulate_every):
+                # not updated
                 image_batch = next(self.loader).cuda(self.rank)
                 self.GAN.D_cl(image_batch, accumulate=True)
 
@@ -912,36 +973,67 @@ class Trainer():
         self.GAN.D_opt.zero_grad()
 
         for i in gradient_accumulate_contexts(self.gradient_accumulate_every, self.is_ddp, ddps=[D_aug, S, G]):
+            # Get real images and demos
+            if not self.conditional:
+                _,image_batch = next(self.loader)
+                demo_batch = None
+            else:
+                _,image_batch,demo_batch = next(self.loader)
+                demo_batch = demo_batch.cuda(self.rank)
+                demo_conv = demo_batch[:,:,None,None].expand(-1,-1,self.image_size, self.image_size).cuda(self.rank)
+
+            image_batch = image_batch.cuda(self.rank)
+            image_batch.requires_grad_()
+            
+            print(image_batch.shape)
+            # Get latents and generate images
             get_latents_fn = mixed_list if random() < self.mixed_prob else noise_list
-            style = get_latents_fn(batch_size, num_layers, latent_dim, device=self.rank)
+            # v1
+#             style = get_latents_fn(batch_size, num_layers, latent_dim, device=self.rank, demo_batch=demo_batch)
+#             w_space = latent_to_w(S, style)
+            
+            # v2
+            if self.conditional:
+                style = get_latents_fn(batch_size, num_layers, latent_dim, device=self.rank)
+                w_space = latent_to_w(S, style, demo_batch=[demo_batch]*len(style))
+            else:
+                style = get_latents_fn(batch_size, num_layers, latent_dim, device=self.rank)
+                w_space = latent_to_w(S, style)
+                
+            w_styles = styles_def_to_tensor(w_space)
             noise = image_noise(batch_size, image_size, device=self.rank)
 
-            w_space = latent_to_w(S, style)
-            w_styles = styles_def_to_tensor(w_space)
-
             generated_images = G(w_styles, noise)
-            fake_output, fake_q_loss = D_aug(generated_images.clone().detach(), detach = True, **aug_kwargs)
 
-            image_batch = next(self.loader).cuda(self.rank)
-            image_batch.requires_grad_()
-            real_output, real_q_loss = D_aug(image_batch, **aug_kwargs)
+            # Discriminator output for fake and real images
+            if self.conditional:
+                fake_images_to_disc = torch.cat([generated_images.clone().detach(), demo_conv], 1).float()
+                real_images_to_disc = torch.cat([image_batch, demo_conv], 1).float()
+            else:
+                fake_images_to_disc = generated_images.clone().detach()
+                real_images_to_disc = image_batch
+                
+            fake_output, fake_q_loss = D_aug(fake_images_to_disc, detach = True, **aug_kwargs)
+            real_output, real_q_loss = D_aug(real_images_to_disc, **aug_kwargs)
 
             real_output_loss = real_output
             fake_output_loss = fake_output
 
-            if self.rel_disc_loss:
+            if self.rel_disc_loss: # default False (relative discriminator loss)
                 real_output_loss = real_output_loss - fake_output.mean()
                 fake_output_loss = fake_output_loss - real_output.mean()
 
             divergence = D_loss_fn(real_output_loss, fake_output_loss)
             disc_loss = divergence
-
+            
+            # default False (quantization)
             if self.has_fq:
                 quantize_loss = (fake_q_loss + real_q_loss).mean()
                 self.q_loss = float(quantize_loss.detach().item())
 
                 disc_loss = disc_loss + quantize_loss
-
+            
+            # every 4 steps
             if apply_gradient_penalty:
                 gp = gradient_penalty(image_batch, real_output)
                 self.last_gp_loss = gp.clone().detach().item()
@@ -964,19 +1056,39 @@ class Trainer():
         self.GAN.G_opt.zero_grad()
 
         for i in gradient_accumulate_contexts(self.gradient_accumulate_every, self.is_ddp, ddps=[S, G, D_aug]):
+            
+#             if not self.conditional:
+#                 _, image_batch = next(self.loader)
+#                 demo_batch = None
+#             else:
+#                 _, image_batch, demo_batch = next(self.loader)
+#                 demo_batch = demo_batch.cuda(self.rank)
+#                 demo_conv = demo_batch[:,:,None,None].expand(-1,-1,self.image_size, self.image_size).cuda(self.rank)
+            
+            # v1
+#             style = get_latents_fn(batch_size, num_layers, latent_dim, device=self.rank, demo_batch=demo_batch)
+#             w_space = latent_to_w(S, style)
+            
+            # v2
             style = get_latents_fn(batch_size, num_layers, latent_dim, device=self.rank)
+            w_space = latent_to_w(S, style)#, demo_batch=[demo_batch]*len(style))
+            
+            w_styles = styles_def_to_tensor(w_space)
             noise = image_noise(batch_size, image_size, device=self.rank)
 
-            w_space = latent_to_w(S, style)
-            w_styles = styles_def_to_tensor(w_space)
-
             generated_images = G(w_styles, noise)
-            fake_output, _ = D_aug(generated_images, **aug_kwargs)
+            if self.conditional:
+                fake_images_to_disc = torch.cat([generated_images.clone().detach(), demo_conv], 1).float()
+            else:
+                fake_images_to_disc = generated_images
+                
+            fake_output, _ = D_aug(fake_images_to_disc, **aug_kwargs)
             fake_output_loss = fake_output
 
             real_output = None
+            # required when contrastive loss is used
             if G_requires_reals:
-                image_batch = next(self.loader).cuda(self.rank)
+                image_batch = image_batch.cuda(self.rank)
                 real_output, _ = D_aug(image_batch, detach = True, **aug_kwargs)
                 real_output = real_output.detach()
 
@@ -1061,18 +1173,36 @@ class Trainer():
         num_layers = self.GAN.G.num_layers
 
         # latents and noise
-
+        
+        # v1
+#         if self.conditional:
+#             demo_batch = torch.randint(0,2,(num_rows**2, self.demo_channels))
+#         else:
+#             demo_batch = None
+        
+#         latents = noise_list(num_rows ** 2, num_layers, latent_dim, device=self.rank, demo_batch = demo_batch)
+                             
+        # v2
         latents = noise_list(num_rows ** 2, num_layers, latent_dim, device=self.rank)
+#        demo = torch.randint(0,2,(num_rows, self.demo_channels))
+#        demo_batch = demo.repeat_interleave(num_rows, dim=0).cuda(self.rank)
         n = image_noise(num_rows ** 2, image_size, device=self.rank)
 
         # regular
-
-        generated_images = self.generate_truncated(self.GAN.S, self.GAN.G, latents, n, trunc_psi = self.trunc_psi)
+        
+        if self.conditional:
+            generated_images = self.generate_truncated(self.GAN.S, self.GAN.G, latents, n, trunc_psi = self.trunc_psi, demo_batch = [demo_batch])
+        else:
+            generated_images = self.generate_truncated(self.GAN.S, self.GAN.G, latents, n, trunc_psi = self.trunc_psi)
+        
         torchvision.utils.save_image(generated_images, str(self.results_dir / self.name / f'{str(num)}.{ext}'), nrow=num_rows)
             
         # moving averages
 
-        generated_images = self.generate_truncated(self.GAN.SE, self.GAN.GE, latents, n, trunc_psi = self.trunc_psi)
+        if self.conditional:
+            generated_images = self.generate_truncated(self.GAN.SE, self.GAN.GE, latents, n, trunc_psi = self.trunc_psi, demo_batch = [demo_batch])
+        else:
+            generated_images = self.generate_truncated(self.GAN.SE, self.GAN.GE, latents, n, trunc_psi = self.trunc_psi)
         torchvision.utils.save_image(generated_images, str(self.results_dir / self.name / f'{str(num)}-ema.{ext}'), nrow=num_rows)
 
         # mixing regularities
@@ -1084,17 +1214,29 @@ class Trainer():
             a = a.repeat(*(repeat_idx))
             order_index = torch.LongTensor(np.concatenate([init_dim * np.arange(n_tile) + i for i in range(init_dim)])).cuda(self.rank)
             return torch.index_select(a, dim, order_index)
-
+        
+        # (num_rows, latent_dim)
         nn = noise(num_rows, latent_dim, device=self.rank)
-        tmp1 = tile(nn, 0, num_rows)
-        tmp2 = nn.repeat(num_rows, 1)
+ #       demo = torch.randint(0,2,(num_rows, self.demo_channels)).cuda(self.rank)
 
+        # (1,1,1..1,2,2,2..2,3,3,3..3....)
+        tmp1 = tile(nn, 0, num_rows)
+#        demo1 = tile(demo, 0, num_rows)
+        # (1,2,3,...,1,2,3,...,1,2,3,...)
+        tmp2 = nn.repeat(num_rows, 1)
+#        demo2 = demo.repeat(num_rows, 1)
+    
         tt = int(num_layers / 2)
         mixed_latents = [(tmp1, tt), (tmp2, num_layers - tt)]
 
-        generated_images = self.generate_truncated(self.GAN.SE, self.GAN.GE, mixed_latents, n, trunc_psi = self.trunc_psi)
+        if self.conditional:
+            generated_images = self.generate_truncated(self.GAN.SE, self.GAN.GE, mixed_latents, n, trunc_psi = self.trunc_psi, demo_batch = [demo1, demo2])
+        else:
+            generated_images = self.generate_truncated(self.GAN.SE, self.GAN.GE, mixed_latents, n, trunc_psi = self.trunc_psi)
         torchvision.utils.save_image(generated_images, str(self.results_dir / self.name / f'{str(num)}-mr.{ext}'), nrow=num_rows)
-
+                             
+#         print(str(self.results_dir / self.name / f'{str(num)}-mr.{ext}'))
+                             
     @torch.no_grad()
     def calculate_fid(self, num_batches):
         from pytorch_fid import fid_score
@@ -1165,13 +1307,67 @@ class Trainer():
         return w_space
 
     @torch.no_grad()
-    def generate_truncated(self, S, G, style, noi, trunc_psi = 0.75, num_image_tiles = 8):
+    def generate_truncated(self, S, G, style, noi, trunc_psi = 0.75, num_image_tiles = 8, demo_batch = None):
         w = map(lambda t: (S(t[0]), t[1]), style)
         w_truncated = self.truncate_style_defs(w, trunc_psi = trunc_psi)
+        
+        # v2 only
+        if self.conditional:
+            if demo_batch is None:
+                demo = torch.randint(0,2,(num_rows, self.demo_channels))
+                demo_batch = demo.repeat_interleave(num_rows, dim=0).cuda(rank)
+            w_truncated = [(torch.cat([w, demo], dim=1), num_layers) for (w,num_layers), demo in zip(w_truncated, demo_batch)]
+            
         w_styles = styles_def_to_tensor(w_truncated)
         generated_images = evaluate_in_chunks(self.batch_size, G, w_styles, noi)
+#         if self.conditional and demo_batch is None:
+#             return generated_images.clamp_(0., 1.), demo
+#         else:
         return generated_images.clamp_(0., 1.)
 
+    @torch.no_grad()
+    def style_mix(self, trunc_psi = 0.75):
+        self.GAN.eval()
+        ext = self.image_extension
+        
+        latent_dim = self.GAN.G.latent_dim
+        image_size = self.GAN.G.image_size
+        num_layers = self.GAN.G.num_layers
+        
+        latents_1 = self.GAN.SE(noise(num_layers, latent_dim, device=self.rank))
+        latents_2 = self.GAN.SE(noise(1, latent_dim, device=self.rank)).expand(num_layers, -1)
+        n = image_noise(num_layers, latent_dim, device=self.rank)
+
+        w = [(latents_1, num_layers)]
+        w_truncated = self.truncate_style_defs(w, trunc_psi = trunc_psi)
+        w_styles = styles_def_to_tensor(w_truncated)
+        
+        generated_images = []
+        generated_images.append(self.GAN.G(w_styles, n))
+
+        for i in range(1, num_layers+1):
+            if i == 1:
+                w = [(latents_2, 1)] + [(latents_1, num_layers-i)]
+            elif i == num_layers:
+                w = [(latents_1, i-1)] + [(latents_2, 1)] 
+            else:
+                w = [(latents_1, i-1)] + [(latents_2, 1)] + [(latents_1, num_layers-i)]
+
+            w_truncated = self.truncate_style_defs(w, trunc_psi = trunc_psi)
+            w_styles = styles_def_to_tensor(w_truncated)
+            generated_images.append(self.GAN.G(w_styles, n))
+            
+        w2 = [(latents_2, num_layers)]
+        w_truncated = self.truncate_style_defs(w2, trunc_psi = trunc_psi)
+        w_styles = styles_def_to_tensor(w_truncated)
+        generated_images.append(self.GAN.G(w_styles, n))
+        
+        generated_images = torch.cat(generated_images, dim=0)
+        images_grid = torchvision.utils.make_grid(generated_images, nrow = num_layers)
+        pil_image = transforms.ToPILImage()(images_grid.cpu())
+
+        return pil_image
+    
     @torch.no_grad()
     def generate_interpolation(self, num = 0, num_image_tiles = 8, trunc = 1.0, num_steps = 100, save_frames = False):
         self.GAN.eval()
@@ -1242,9 +1438,7 @@ class Trainer():
         
         (self.results_dir / self.name).mkdir(parents=True, exist_ok=True)
         (self.models_dir / self.name).mkdir(parents=True, exist_ok=True)
-        print(self.results_dir / self.name)
-        print(self.models_dir / self.name)
-
+        
     def clear(self):
         rmtree(str(self.models_dir / self.name), True)
         rmtree(str(self.results_dir / self.name), True)
@@ -1255,7 +1449,7 @@ class Trainer():
     def save(self, num):
         save_data = {
             'GAN': self.GAN.state_dict(),
-            'version': __version__
+            'timestamp': datetime.timestamp(datetime.now())
         }
 
         if self.GAN.fp16:
@@ -1269,7 +1463,8 @@ class Trainer():
 
         name = num
         if num == -1:
-            file_paths = [p for p in Path(self.models_dir / self.name).glob('model_*.pt')]
+            file_paths = [p 
+                          for p in Path(self.models_dir / self.name).glob('model_*.pt')]
             saved_nums = sorted(map(lambda x: int(x.stem.split('_')[1]), file_paths))
             if len(saved_nums) == 0:
                 return
@@ -1278,7 +1473,8 @@ class Trainer():
 
         self.steps = name * self.save_every
 
-        load_data = torch.load(self.model_name(name))
+        print("Loading", self.model_name(name))
+        load_data = torch.load(self.model_name(name), map_location="cuda:"+str(self.rank))
 
         if 'version' in load_data:
             print(f"loading from version {load_data['version']}")
@@ -1290,3 +1486,4 @@ class Trainer():
             raise e
         if self.GAN.fp16 and 'amp' in load_data:
             amp.load_state_dict(load_data['amp'])
+            
