@@ -2,7 +2,6 @@ import os
 import sys
 sys.path.append("models/")
 import math
-import fire
 import json
 from datetime import datetime
 
@@ -48,8 +47,6 @@ try:
     APEX_AVAILABLE = True
 except:
     APEX_AVAILABLE = False
-
-import aim
 
 assert torch.cuda.is_available(), 'You need to have an Nvidia GPU with CUDA installed.'
 
@@ -554,8 +551,7 @@ class Trainer():
         self.attn_layers = config.pop('attn_layers', [])
         self.no_const = config.pop('no_const', False)
         self.lr_mlp = config.pop('lr_mlp', 0.1)
-        del self.GAN
-        self.init_GAN()
+
 
     def config(self):
         return {'image_size': self.image_size, 'network_capacity': self.network_capacity, 'lr_mlp': self.lr_mlp, 'transparent': self.transparent, 'fq_layers': self.fq_layers, 'fq_dict_size': self.fq_dict_size, 'attn_layers': self.attn_layers, 'no_const': self.no_const}
@@ -866,6 +862,8 @@ class Trainer():
                                          # str(self.results_dir / self.name / f'{str(num)}-rand.{ext}'),
                                          # nrow=num_rows)
 
+#         return latents, w
+
     @torch.no_grad()
     def truncate_style(self, tensor, trunc_psi = 0.75):
         S = self.GAN.S
@@ -969,11 +967,15 @@ class Trainer():
 
     def load(self, load_type='model', num = -1):
         self.load_config()
-
+      
         if load_type == 'model':
+            del self.GAN
+            self.init_GAN()
             pth = Path(self.models_dir).glob('model_*.pt')
         else:
-            pth = Path(self.models_dir / 'encoder' / self.encoder_name).glob('enc_*.pt')
+            del self.encoder
+            self.init_encoder()
+            pth = Path(self.models_dir / self.encoder_name).glob('enc_*.pt')
         
         name = num
         if num == -1:
@@ -989,13 +991,14 @@ class Trainer():
         print("Loading", self.model_name(load_type, name))
         load_data = torch.load(self.model_name(load_type, name), map_location="cuda:"+str(self.rank))
 
+        
         if 'version' in load_data:
             print(f"loading from version {load_data['version']}")
 
         try:
             if load_type == 'model':
                 self.GAN.load_state_dict(load_data['GAN'])
-            elif load_type == 'encoder':
+            elif load_type == 'enc':
                 self.encoder.load_state_dict(load_data['encoder'])
         except Exception as e:
             print('unable to load saved model. please try downgrading the package to the version specified by the saved model')

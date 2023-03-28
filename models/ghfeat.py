@@ -106,9 +106,7 @@ class GHFeat_Enc(nn.Module):
         # add another residual block to obtain lower resolution feature map 
         # not part of resnet but part of ghfeat
         self.layer5 = self._make_layer(BottleneckEnc, self.filters[4], 1, stride=2)
-        
-#         self.fpn_conv = []
-#         self.fpn_conv1 = []
+
         self.sam_conv = []
         
         # 1801
@@ -116,23 +114,19 @@ class GHFeat_Enc(nn.Module):
         
         self.start_level = 1
         for i in range(self.start_level, self.num_layers+1):
-#             self.fpn_conv.append(nn.Conv2d(self.filters[i]*4, 512, kernel_size=1, stride=1, bias=True))
-#             self.fpn_conv1.append(nn.Conv2d(512, 512, kernel_size=1, stride=1, bias=True))
             self.sam_conv.append(nn.Conv2d(512, 512, kernel_size=2, stride=1, bias=True))
             # 1801
             self.fc.append(nn.Linear(2048, 512))
             
-        
-#         self.fpn_conv = nn.Sequential(*self.fpn_conv)
-#         self.fpn_conv1 = nn.Sequential(*self.fpn_conv1)
         self.sam_conv = nn.Sequential(*self.sam_conv)
         # 1801
         self.fc = nn.Sequential(*self.fc)
         
+        
         self.fpn = torchvision.ops.FeaturePyramidNetwork([self.filters[i]*4 for i in range(self.start_level, self.num_layers+1)], 512)
         self.upscale = nn.Upsample(scale_factor=2)
         self.downsample = nn.AvgPool2d(2)
-      
+        self.bn2 = nn.BatchNorm1d(5)
         self.apply(weights_init)
  
 # Resnet18
@@ -162,23 +156,6 @@ class GHFeat_Enc(nn.Module):
             layers.append(block(self.in_planes, planes))
 
         return nn.Sequential(*layers)    
-    
-#     def fpn(self, inputs):
-#         # len(inputs) == 6 0,1,2,3,4,5
-#         laterals = []
-#         for i in range(self.start_level, self.num_layers+1):
-#             laterals.append(self.fpn_conv[i-self.start_level](inputs[i]))
-        
-#         flevel = len(laterals)
-#         for i in range(flevel-1, 0, -1):
-#             laterals[i-1] += self.upscale(laterals[i])
-
-#         outs = []
-#         for i in range(flevel):
-#             outs.append(self.fpn_conv1[i](laterals[i]))
-# #             outs.append(laterals[i])
-    
-#         return outs
     
     def sam(self, inputs):
         # recurrent downsample
@@ -224,5 +201,12 @@ class GHFeat_Enc(nn.Module):
 #         return torch.cat(inputs, axis=3).squeeze().permute(0,2,1)
 
         ## 1801
+#         inputs = [self.fc[i](z.view(batch_size,-1))[:,None,:] for i,z in enumerate(inputs)]
+#         return torch.cat(inputs, axis=1)
+
+
+        ## 2801
         inputs = [self.fc[i](z.view(batch_size,-1))[:,None,:] for i,z in enumerate(inputs)]
-        return torch.cat(inputs, axis=1)
+        inputs = torch.cat(inputs, axis=1)
+        
+        return self.bn2(inputs)
