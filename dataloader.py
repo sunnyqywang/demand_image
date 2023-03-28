@@ -60,6 +60,8 @@ class ImageHDF5(Dataset):
             self.demo_df = pd.merge(temp, self.demo_df, how='left', left_on=['state','county','tract'], right_on=['STATEFP','COUNTYFP','TRACTCE']).fillna(0)
             self.demo_df = torch.tensor(self.demo_df[self.columns].to_numpy())
             
+            # print(self.demo_df)
+
     def __len__(self):
         return len(self.data_info) // self.shuffle_unit
 
@@ -275,21 +277,33 @@ def load_aggregate_travel_behavior(file, data_version):
 
 def load_demo_v2(data_dir):
     
+    # Smart Locations from EPA
     epa = pd.read_csv(data_dir+"EPA_SmartLocations_CensusTract_export.csv")
-    
     # log_tranform
     epa['activity_density'] = np.log(epa['activity_density'])
     
+    # Pollution PM2.5
     pm = pd.read_csv(data_dir+"PM2.5_Concentrations_2016_Illinois_Average_Annual.csv")
     pm['ctfips'] = pm['ctfips'] % 1e6
     pm['ctfips'] = pm['ctfips'].astype(int)
     demo_df = pd.merge(epa, pm, left_on=['STATEFP','COUNTYFP','TRACTCE'], right_on=['statefips','countyfips','ctfips'])
 
+    # ACS Demo
+    acs = pd.read_csv(data_dir+"demo_tract.csv")
+    acs['pop_density'] = acs['tot_population'] / acs['area']
+    demo_df = pd.merge(demo_df, acs, left_on=['COUNTYFP','TRACTCE'], right_on=['COUNTYA','TRACTA'])
+
     # normalize
-    real_columns = ['activity_density','auto_oriented','multi_modal','pedestrian_oriented','PM2.5']
+    # real_columns = ['activity_density','auto_oriented','multi_modal','pedestrian_oriented','PM2.5']
+    real_columns = ['pop_density','inc_per_capita']
+
     for c in real_columns:
         demo_df[c] = (demo_df[c] - demo_df[c].mean())/demo_df[c].std()
-    pct_columns = ['employment_entropy','pop_income_entropy','wrk_emp_balance']
+
+
+    # pct_columns = ['employment_entropy','pop_income_entropy','wrk_emp_balance']
+    pct_columns = ['pct25_34yrs','pct35_50yrs','pctover65yrs',
+                 'pctwhite_alone','pct_nonwhite']
     for c in pct_columns:
         demo_df[c] = (demo_df[c] - 0.5)/0.5
 

@@ -1,11 +1,9 @@
 import os
 import sys
 import math
-import fire
 import json
 from datetime import datetime
 
-from tqdm import tqdm
 from math import floor, log2
 from random import random
 from shutil import rmtree
@@ -24,15 +22,11 @@ from torch.autograd import grad as torch_grad
 from torch.utils.data.distributed import DistributedSampler
 from torch.nn.parallel import DistributedDataParallel as DDP
 
-from einops import rearrange, repeat
-from kornia.filters import filter2d
-
 import torchvision
 from torchvision import transforms
 # from stylegan2_pytorch.version import __version__
 # from stylegan2_pytorch.diff_augment import DiffAugment
 
-from vector_quantize_pytorch import VectorQuantize
 
 from PIL import Image
 from pathlib import Path
@@ -43,16 +37,13 @@ try:
 except:
     APEX_AVAILABLE = False
 
-import aim
 
 assert torch.cuda.is_available(), 'You need to have an Nvidia GPU with CUDA installed.'
 
-sys.path.append("../../")
-from dataloader import ImageHDF5
-from setup import data_dir, image_dir
-
 from util import *
 from csgan2 import StyleGAN2
+from setup import data_dir, image_dir
+from dataloader import ImageHDF5
     
 # constants
 
@@ -250,7 +241,7 @@ class Trainer():
     def set_data_src(self, folder):
         
         transform=None # iamges are already transformed in the hdf5 dataset
-        self.dataset = ImageHDF5(folder+"hdf5/", data_dir, demo=True, train=None, transform=transform)
+        self.dataset = ImageHDF5(folder, data_dir, demo=True, train=None, transform=transform)
         num_workers = default(self.num_workers, NUM_CORES if not self.is_ddp else 0)
         sampler = DistributedSampler(self.dataset, rank=self.rank, num_replicas=self.world_size, shuffle=True) if self.is_ddp else None
         dataloader = data.DataLoader(self.dataset, num_workers = num_workers, batch_size = math.ceil(self.batch_size / self.world_size), shuffle = not self.is_ddp, drop_last = True, pin_memory = True)

@@ -1,7 +1,6 @@
 import os
 import sys
 import math
-import fire
 import json
 from datetime import datetime
 
@@ -24,13 +23,9 @@ from torch.autograd import grad as torch_grad
 from torch.utils.data.distributed import DistributedSampler
 from torch.nn.parallel import DistributedDataParallel as DDP
 
-from einops import rearrange, repeat
-from kornia.filters import filter2d
-
 import torchvision
 from torchvision import transforms
-
-from vector_quantize_pytorch import VectorQuantize
+from kornia.filters import filter2d
 
 from PIL import Image
 from pathlib import Path
@@ -41,11 +36,8 @@ try:
 except:
     APEX_AVAILABLE = False
 
-import aim
-
 assert torch.cuda.is_available(), 'You need to have an Nvidia GPU with CUDA installed.'
-
-sys.path.append("../../")
+# sys.path.append("/home/gridsan/qwang/demand_image/")
 from dataloader import ImageDataset
 from setup import data_dir, image_dir
 

@@ -1,12 +1,10 @@
 import os
-import fire
 import random
-from retry.api import retry_call
-from tqdm import tqdm
 from datetime import datetime
 from functools import wraps
 import sys
 sys.path.append("models/stylegan2/")
+sys.path.append(".")
 from csgan2_trainer import Trainer
 from util import NanException
 
@@ -15,7 +13,7 @@ import torch.multiprocessing as mp
 import torch.distributed as dist
 
 import numpy as np
-from setup import proj_dir, image_dir, out_dir, model_dir
+from setup import image_dir, out_dir, model_dir
 
 
 def run_training(rank, world_size, model_args, data, load_from, new, num_train_steps, name, seed):
@@ -48,7 +46,8 @@ def run_training(rank, world_size, model_args, data, load_from, new, num_train_s
 
 #     progress_bar = tqdm(initial = model.steps, total = num_train_steps, mininterval=10., desc=f'{name}<{data}>', position=0, leave=True)
     while model.steps < num_train_steps:
-        retry_call(model.train, tries=3, exceptions=NanException)
+        model.train()
+#         retry_call(model.train, tries=3, exceptions=NanException)
 #         progress_bar.n = model.steps
 #         progress_bar.refresh()
         if is_main and model.steps % 50 == 0:
@@ -62,14 +61,14 @@ def run_training(rank, world_size, model_args, data, load_from, new, num_train_s
         
 if __name__ == '__main__':
     
-    data = image_dir+"zoom15/"
+    data = image_dir
     results_dir = out_dir
     models_dir = model_dir
-    name = '230323-c1'
+    name = '230328-c1'
     new = True
     load_from = -1
     image_size = 64
-    condition_dim = 8
+    condition_dim = 7
     condition_on_mapper = False
     network_capacity = 16
     fmap_max = 512
