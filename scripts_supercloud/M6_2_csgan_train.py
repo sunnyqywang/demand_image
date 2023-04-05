@@ -64,7 +64,7 @@ if __name__ == '__main__':
     data = image_dir
     results_dir = out_dir
     models_dir = model_dir
-    name = '230328-c1'
+    name = '230329-c2'
     new = True
     load_from = -1
     image_size = 64
@@ -75,7 +75,7 @@ if __name__ == '__main__':
     transparent = False
     batch_size = 8
     gradient_accumulate_every = 6
-    num_train_steps = 100000
+    num_train_steps = 30000
     learning_rate = 2e-4
     lr_mlp = 0.1
     ttur_mult = 1.5

@@ -30,7 +30,7 @@ def natural_keys(text):
 
 class ImageHDF5(Dataset):
     
-    def __init__(self, image_dir, data_dir, demo=False, train=True, transform=None):
+    def __init__(self, image_dir, data_dir, demo=False, train=True, transform=None, columns=None):
         super().__init__()
         self.shuffle_unit = 4
         self.transform = transform
@@ -56,6 +56,8 @@ class ImageHDF5(Dataset):
         
         if demo:
             self.demo_df, self.columns = load_demo_v2(data_dir)
+            if columns is not None:
+                self.columns = columns
             temp = self.data_info.drop_duplicates(subset=['state','county','tract'])
             self.demo_df = pd.merge(temp, self.demo_df, how='left', left_on=['state','county','tract'], right_on=['STATEFP','COUNTYFP','TRACTCE']).fillna(0)
             self.demo_df = torch.tensor(self.demo_df[self.columns].to_numpy())
@@ -294,21 +296,23 @@ def load_demo_v2(data_dir):
     demo_df = pd.merge(demo_df, acs, left_on=['COUNTYFP','TRACTCE'], right_on=['COUNTYA','TRACTA'])
 
     # normalize
-    # real_columns = ['activity_density','auto_oriented','multi_modal','pedestrian_oriented','PM2.5']
-    real_columns = ['pop_density','inc_per_capita']
+    real_columns = ['activity_density','auto_oriented','multi_modal','pedestrian_oriented','PM2.5']
+    real_columns += ['pop_density','inc_per_capita']
 
     for c in real_columns:
-        demo_df[c] = (demo_df[c] - demo_df[c].mean())/demo_df[c].std()
+        # demo_df[c] = (demo_df[c] - demo_df[c].mean())/demo_df[c].std()
+        demo_df[c] = demo_df[c]/demo_df[c].max()
+        demo_df[c] = (demo_df[c]-0.5)/0.5
 
-
-    # pct_columns = ['employment_entropy','pop_income_entropy','wrk_emp_balance']
-    pct_columns = ['pct25_34yrs','pct35_50yrs','pctover65yrs',
+    pct_columns = ['employment_entropy','pop_income_entropy','wrk_emp_balance']
+    pct_columns += ['pct25_34yrs','pct35_50yrs','pctover65yrs',
                  'pctwhite_alone','pct_nonwhite']
     for c in pct_columns:
         demo_df[c] = (demo_df[c] - 0.5)/0.5
 
-    columns = real_columns + pct_columns
-    
+    columns = ['pop_density','inc_per_capita','pct25_34yrs','pct35_50yrs','pctover65yrs',
+                 'pctwhite_alone','pct_nonwhite']
+
     return demo_df, columns
 
 def load_demo_v1(data_dir, norm=2):

@@ -4,11 +4,9 @@
 import os
 import sys
 import math
-import fire
 import json
 from datetime import datetime
 
-from tqdm import tqdm
 from math import floor, log2
 from random import random
 from shutil import rmtree
@@ -27,15 +25,12 @@ from torch.autograd import grad as torch_grad
 from torch.utils.data.distributed import DistributedSampler
 from torch.nn.parallel import DistributedDataParallel as DDP
 
-from einops import rearrange, repeat
 from kornia.filters import filter2d
 
 import torchvision
 from torchvision import transforms
 # from stylegan2_pytorch.version import __version__
 # from stylegan2_pytorch.diff_augment import DiffAugment
-
-from vector_quantize_pytorch import VectorQuantize
 
 from PIL import Image
 from pathlib import Path
@@ -46,7 +41,6 @@ try:
 except:
     APEX_AVAILABLE = False
 
-import aim
 
 assert torch.cuda.is_available(), 'You need to have an Nvidia GPU with CUDA installed.'
 

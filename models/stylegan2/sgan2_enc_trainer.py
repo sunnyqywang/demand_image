@@ -5,7 +5,6 @@ import math
 import json
 from datetime import datetime
 
-from tqdm import tqdm
 from math import floor, log2
 from random import random
 from shutil import rmtree
@@ -24,9 +23,6 @@ from torch.autograd import grad as torch_grad
 from torch.utils.data.distributed import DistributedSampler
 from torch.nn.parallel import DistributedDataParallel as DDP
 
-from einops import rearrange, repeat
-from kornia.filters import filter2d
-
 import torchvision
 from torchvision import transforms
 import lpips
@@ -37,7 +33,6 @@ from ghfeat import GHFeat_Enc
 from stylex import DiscriminatorE
 
 from util import *
-from vector_quantize_pytorch import VectorQuantize
 
 from PIL import Image
 from pathlib import Path
@@ -566,7 +561,7 @@ class Trainer():
 #             torchvision.transforms.Normalize([0.5,0.5,0.5], [0.5,0.5,0.5])])
         transform=None
 #         self.dataset = ImageDataset(folder, data_dir, train=True, data_version='1571', transform=transform, sampling='clustered', image_type='png', augment=None, demo=self.conditional)
-        self.dataset = ImageHDF5(folder+"hdf5/", data_dir, train=True, transform=transform)
+        self.dataset = ImageHDF5(folder, data_dir, train=True, transform=transform)
         num_workers = default(self.num_workers, NUM_CORES if not self.is_ddp else 0)
         sampler = DistributedSampler(self.dataset, rank=self.rank, num_replicas=self.world_size, shuffle=True) if self.is_ddp else None
         dataloader = data.DataLoader(self.dataset, num_workers = num_workers, batch_size = math.ceil(self.batch_size / self.world_size), shuffle = not self.is_ddp, drop_last = True, pin_memory = True)
@@ -586,10 +581,10 @@ class Trainer():
 #             torchvision.transforms.Resize(self.image_size)])
         transform=None
 #         self.test_dataset = ImageDataset(folder, data_dir, train=False, data_version='1571', transform=transform, sampling='clustered', image_type='png', augment=None, demo=self.conditional)
-        self.test_dataset = ImageHDF5(folder+"hdf5/", data_dir, train=False, transform=transform)
+        self.test_dataset = ImageHDF5(folder, data_dir, train=False, transform=transform)
 
-        num_workers = num_workers = default(self.num_workers, NUM_CORES if not self.is_ddp else 0)
-        self.test_dataloader = data.DataLoader(self.test_dataset, num_workers = num_workers, batch_size = batch_size, shuffle = not self.is_ddp, drop_last = True, pin_memory = True)
+        # num_workers = num_workers = default(self.num_workers, NUM_CORES if not self.is_ddp else 0)
+        self.test_dataloader = data.DataLoader(self.test_dataset, num_workers = 0, batch_size = batch_size, shuffle = not self.is_ddp, drop_last = True, pin_memory = True)
         
       
     def train_encoder_only(self):
@@ -631,6 +626,7 @@ class Trainer():
         G_loss_fn = gen_hinge_loss
         
         self.E_opt.zero_grad()
+
         self.GAN.D_opt.zero_grad()
 
         for i in gradient_accumulate_contexts(self.gradient_accumulate_every, self.is_ddp, ddps=[D_aug]):
@@ -687,7 +683,8 @@ class Trainer():
         self.track(self.d_loss, 'D')
 
         self.GAN.D_opt.step()
-        
+
+ 
         for i in gradient_accumulate_contexts(self.gradient_accumulate_every, self.is_ddp, ddps=[]):
             _,image_batch = next(self.loader)
             image_batch = torch.flatten(image_batch, start_dim=0, end_dim=-4)
@@ -742,7 +739,6 @@ class Trainer():
 
 #             gen_loss = gen_loss / self.gradient_accumulate_every
 #             gen_loss.register_hook(raise_if_nan)
-            backwards(gen_disc_loss, self.GAN.D_opt, loss_id=4, retain_graph=True)
 
             backwards(gen_disc_loss, self.E_opt, loss_id=3, retain_graph=True)
             backwards(rec_loss, self.E_opt, loss_id=2, retain_graph=True)

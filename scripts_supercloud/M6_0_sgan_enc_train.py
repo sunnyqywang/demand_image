@@ -1,6 +1,6 @@
 import sys
 sys.path.append("models/stylegan2/")
-
+sys.path.append(".")
 from sgan2_enc_trainer import Trainer
 
 import os
@@ -17,7 +17,7 @@ import torch.distributed as dist
 
 import numpy as np
 
-from setup import proj_dir, image_dir, out_dir, model_dir
+from setup import image_dir, out_dir, model_dir
 
 def encoder_training(rank, world_size, model_args, data, gan_load_from, enc_load_from, new, num_train_steps, seed):
 #     is_main = rank == 0
@@ -47,13 +47,14 @@ def encoder_training(rank, world_size, model_args, data, gan_load_from, enc_load
         model.clear()
 
     model.set_data_src(data)
-    model.set_test_data_src(data, 4)
+    model.set_test_data_src(data, 8)
 
-    progress_bar = tqdm(initial = model.steps, total = num_train_steps, mininterval=10., desc=f'<{data}>', position=0, leave=True)
+    # progress_bar = tqdm(initial = model.steps, total = num_train_steps, mininterval=10., desc=f'<{data}>', position=0, leave=True)
     while model.steps < num_train_steps:
-        retry_call(model.train_encoder_only, tries=3, exceptions=NanException)
-        progress_bar.n = model.steps
-        progress_bar.refresh()
+        # retry_call(model.train_encoder_only, tries=3, exceptions=NanException)
+        # progress_bar.n = model.steps
+        # progress_bar.refresh()
+        model.train_encoder_only()
         if is_main and model.steps % 500 == 0:
             model.print_log()
 
@@ -63,11 +64,11 @@ def encoder_training(rank, world_size, model_args, data, gan_load_from, enc_load
         dist.destroy_process_group()
         
 if __name__ == '__main__':
-    data = image_dir+"zoom15/"
+    data = image_dir
     results_dir = out_dir
     models_dir = model_dir
     stylegan_name = '2303-2'
-    encoder_name = '2801'
+    encoder_name = '0402'
 
     # GAN
     gan_load_from = 100

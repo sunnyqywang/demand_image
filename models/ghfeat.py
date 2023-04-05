@@ -4,6 +4,7 @@ import torch.nn.functional as F
 from math import log2
 import torchvision
 from collections import OrderedDict 
+from sgan2 import StyleVectorizer
 
 def weights_init(m):
     if isinstance(m, nn.Conv2d):
@@ -126,9 +127,12 @@ class GHFeat_Enc(nn.Module):
         self.fpn = torchvision.ops.FeaturePyramidNetwork([self.filters[i]*4 for i in range(self.start_level, self.num_layers+1)], 512)
         self.upscale = nn.Upsample(scale_factor=2)
         self.downsample = nn.AvgPool2d(2)
-        self.bn2 = nn.BatchNorm1d(5)
+        # self.bn2 = nn.BatchNorm1d(self.encoder_dim*5)
+
+        # 0401
+        self.transform = StyleVectorizer(self.encoder_dim, depth=8)
         self.apply(weights_init)
- 
+
 # Resnet18
 #     def _make_layer(self, block, planes, num_Blocks, stride):
 #         strides = [stride] + [1]*(num_Blocks-1)
@@ -206,7 +210,18 @@ class GHFeat_Enc(nn.Module):
 
 
         ## 2801
+        # inputs = [self.fc[i](z.view(batch_size,-1))[:,None,:] for i,z in enumerate(inputs)]
+        # inputs = torch.cat(inputs, axis=1).view(batch_size, -1)
+        # inputs = self.bn2(inputs)
+        
+        # return inputs.view(batch_size, -1, self.encoder_dim)
+
+        ## 0401
         inputs = [self.fc[i](z.view(batch_size,-1))[:,None,:] for i,z in enumerate(inputs)]
         inputs = torch.cat(inputs, axis=1)
-        
-        return self.bn2(inputs)
+        z = []
+        for i in range(5):
+            z.append(self.transform(F.normalize(inputs[:,i,:], dim=1))[:,None,:])
+        z = torch.cat(z, axis=1) 
+ 
+        return z
