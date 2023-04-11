@@ -92,7 +92,7 @@ class GHFeat_Enc(nn.Module):
         self.filters = [64, 64, 128, 256, 512, 512] ## ResNet50
 
         # stage 1
-        self.conv1 = nn.Conv2d(nc, self.filters[0], kernel_size=7, stride=1, padding=6, bias=False)
+        self.conv1 = nn.Conv2d(nc, self.filters[0], kernel_size=7, stride=1, padding=4, bias=False)
         self.bn1 = nn.BatchNorm2d(self.filters[0])
         self.leakyrelu = nn.LeakyReLU(0.2)
         self.maxpool = nn.MaxPool2d(3, stride=2)
@@ -115,7 +115,7 @@ class GHFeat_Enc(nn.Module):
         
         self.start_level = 1
         for i in range(self.start_level, self.num_layers+1):
-            self.sam_conv.append(nn.Conv2d(512, 512, kernel_size=2, stride=1, bias=True))
+            self.sam_conv.append(nn.Conv2d(512, 512, kernel_size=1, stride=1, bias=True))
             # 1801
             self.fc.append(nn.Linear(2048, 512))
             

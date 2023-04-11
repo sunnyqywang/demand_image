@@ -381,6 +381,7 @@ class Trainer():
         rank = 0,
         world_size = 1,
         log = False,
+        rec_scaling = 1,
         *args,
         **kwargs
     ):
@@ -481,6 +482,7 @@ class Trainer():
         self.logger = aim.Session(experiment=name) if log else None
 
         self.encoder_class = encoder_class
+        self.rec_scaling = rec_scaling
         
         self.lpips_loss = lpips.LPIPS(net="alex").cuda(self.rank) # image should be RGB, IMPORTANT: normalized to [-1,1]
         self.tb_writer = None
@@ -597,6 +599,7 @@ class Trainer():
         self.encoder.train()
         
         total_disc_loss = torch.tensor(0.).cuda(self.rank)
+        total_gen_disc_loss = torch.tensor(0.).cuda(self.rank)
         total_rec_loss = torch.tensor(0.).cuda(self.rank)
         total_l1 = torch.tensor(0.).cuda(self.rank)
         total_l2 = torch.tensor(0.).cuda(self.rank)
@@ -720,7 +723,7 @@ class Trainer():
             l1 = l1 / self.gradient_accumulate_every
             l2 = l2 / self.gradient_accumulate_every
             l3 = l3 / self.gradient_accumulate_every
-            rec_loss = l1+l2+l3
+            rec_loss = self.rec_scaling * (l1+l2+l3)
                         
             gen_disc_loss = G_loss_fn(fake_output, real_output) / self.gradient_accumulate_every
 
@@ -751,17 +754,21 @@ class Trainer():
             total_rec_loss += total_l2
             total_rec_loss += total_l3
 #             total_kl_loss += kl_loss.detach().item()
+            total_gen_disc_loss += gen_disc_loss.detach().item() / self.gradient_accumulate_every
 
             self.total_rec_loss = float(total_rec_loss)
 #             self.total_kl_loss = float(total_kl_loss)
             self.total_l1 = float(total_l1)
             self.total_l2 = float(total_l2)
             self.total_l3 = float(total_l3)
+            self.total_gen_disc_loss = float(total_gen_disc_loss)
+
         # If writer exists, write losses
         if exists(self.tb_writer):
             self.tb_writer.add_scalar('loss/rec', self.total_rec_loss, self.steps)
 #             self.tb_writer.add_scalar('loss/kl', self.total_kl_loss, self.steps)
 
+        self.track(self.total_gen_disc_loss, "G")
         self.track(self.total_l1, "Rec_pips")
         self.track(self.total_l2, "Rec_w")
         self.track(self.total_l3, "Rec_i")
@@ -841,14 +848,14 @@ class Trainer():
                                      nrow=num_rows)
 
         # moving averages
-        generated_images = self.generate_truncated(self.GAN.SE, self.GAN.GE, style=w, noi=n, trunc_psi=self.trunc_psi)
-        to_grid = torch.cat((image_batch[:8,:,:,:], generated_images[:8,:,:,:],
-                             image_batch[8:16,:,:,:], generated_images[8:16,:,:,:],
-                             image_batch[16:24,:,:,:], generated_images[16:24,:,:,:],
-                             image_batch[24:,:,:,:], generated_images[24:,:,:,:]))
-        torchvision.utils.save_image(to_grid,
-                                     str(self.results_dir / f'{str(num)}-{from_encoder_string}-ema.{ext}'),
-                                     nrow=num_rows)
+        # generated_images = self.generate_truncated(self.GAN.SE, self.GAN.GE, style=w, noi=n, trunc_psi=self.trunc_psi)
+        # to_grid = torch.cat((image_batch[:8,:,:,:], generated_images[:8,:,:,:],
+                             # image_batch[8:16,:,:,:], generated_images[8:16,:,:,:],
+                             # image_batch[16:24,:,:,:], generated_images[16:24,:,:,:],
+                             # image_batch[24:,:,:,:], generated_images[24:,:,:,:]))
+        # torchvision.utils.save_image(to_grid,
+                                     # str(self.results_dir / f'{str(num)}-{from_encoder_string}-ema.{ext}'),
+                                     # nrow=num_rows)
 
         # if self.alternating_training:
             
@@ -912,7 +919,8 @@ class Trainer():
             ('Rec', self.total_rec_loss),
             ('Rec_w', self.total_l2),
             ('Rec_i', self.total_l3),
-            ('Rec_pips', self.total_l1)
+            ('Rec_pips', self.total_l1),
+            ('E-G', self.total_gen_disc_loss)
         ]
 
         data = [d for d in data if exists(d[1])]
