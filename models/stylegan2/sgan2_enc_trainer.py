@@ -33,6 +33,7 @@ from ghfeat import GHFeat_Enc
 from stylex import DiscriminatorE
 
 from util import *
+import aim
 
 from PIL import Image
 from pathlib import Path
@@ -380,7 +381,6 @@ class Trainer():
         is_ddp = False,
         rank = 0,
         world_size = 1,
-        log = False,
         rec_scaling = 1,
         *args,
         **kwargs
@@ -479,13 +479,13 @@ class Trainer():
         self.rank = rank
         self.world_size = world_size
 
-        self.logger = aim.Session(experiment=name) if log else None
-
         self.encoder_class = encoder_class
         self.rec_scaling = rec_scaling
         
         self.lpips_loss = lpips.LPIPS(net="alex").cuda(self.rank) # image should be RGB, IMPORTANT: normalized to [-1,1]
         self.tb_writer = None
+        
+        self.logger = {}
 
     @property
     def image_extension(self):
@@ -509,9 +509,6 @@ class Trainer():
             self.G_ddp = DDP(self.GAN.G, **ddp_kwargs)
             self.D_ddp = DDP(self.GAN.D, **ddp_kwargs)
             self.D_aug_ddp = DDP(self.GAN.D_aug, **ddp_kwargs)
-
-        if exists(self.logger):
-            self.logger.set_params(self.hparams)
 
     def init_encoder(self):
         
@@ -589,7 +586,7 @@ class Trainer():
         self.test_dataloader = data.DataLoader(self.test_dataset, num_workers = 0, batch_size = batch_size, shuffle = not self.is_ddp, drop_last = True, pin_memory = True)
         
       
-    def train_encoder_only(self):
+    def train_encoder_only(self, train=True, log=True):
                 
         assert exists(self.GAN), 'Must load trained StylEx G, D, and S to train encoder only'
         
@@ -629,7 +626,6 @@ class Trainer():
         G_loss_fn = gen_hinge_loss
         
         self.E_opt.zero_grad()
-
         self.GAN.D_opt.zero_grad()
 
         for i in gradient_accumulate_contexts(self.gradient_accumulate_every, self.is_ddp, ddps=[D_aug]):
@@ -685,7 +681,8 @@ class Trainer():
         self.d_loss = float(total_disc_loss)
         self.track(self.d_loss, 'D')
 
-        self.GAN.D_opt.step()
+        if train:
+            self.GAN.D_opt.step()
 
  
         for i in gradient_accumulate_contexts(self.gradient_accumulate_every, self.is_ddp, ddps=[]):
@@ -750,9 +747,8 @@ class Trainer():
             total_l1 += l1.detach().item()
             total_l2 += l2.detach().item()
             total_l3 += l3.detach().item()
-            total_rec_loss += total_l1
-            total_rec_loss += total_l2
-            total_rec_loss += total_l3
+
+            total_rec_loss = total_l1 + total_l2 + total_l3
 #             total_kl_loss += kl_loss.detach().item()
             total_gen_disc_loss += gen_disc_loss.detach().item() / self.gradient_accumulate_every
 
@@ -768,14 +764,17 @@ class Trainer():
             self.tb_writer.add_scalar('loss/rec', self.total_rec_loss, self.steps)
 #             self.tb_writer.add_scalar('loss/kl', self.total_kl_loss, self.steps)
 
-        self.track(self.total_gen_disc_loss, "G")
-        self.track(self.total_l1, "Rec_pips")
-        self.track(self.total_l2, "Rec_w")
-        self.track(self.total_l3, "Rec_i")
-        self.track(self.total_rec_loss, 'Rec')
+        if log:
+            self.track(self.total_gen_disc_loss, "G")
+            self.track(self.total_l1, "Rec_pips")
+            self.track(self.total_l2, "Rec_w")
+            self.track(self.total_l3, "Rec_i")
+            self.track(self.total_rec_loss, 'Rec')
+
 #         self.track(self.total_kl_loss, 'KL')
 
-        self.E_opt.step()
+        if train:
+            self.E_opt.step()
 
         # calculate moving averages
 
@@ -802,7 +801,6 @@ class Trainer():
         self.steps += 1
         self.av = None
                 
-        
     @torch.no_grad()
     def evaluate(self, num=0, trunc=1.0):
 
@@ -928,9 +926,11 @@ class Trainer():
         print(log)
 
     def track(self, value, name):
-        if not exists(self.logger):
-            return
-        self.logger.track(value, name = name)
+        
+        if name not in self.logger.keys():
+            self.logger[name] = []
+        else:
+            self.logger[name].append(value)
 
     def model_name(self, model_type, num=None):
         if model_type == 'enc':
@@ -959,7 +959,13 @@ class Trainer():
 
     def save(self, num):
         save_data = {
+            'load_gan_num': self.load_gan_num,
+            'gan_name': self.stylegan_name,
+            'encoder_name': self.encoder_name,
+            'rec_scaling': self.rec_scaling,
+            'logger': self.logger,
             'encoder': self.encoder.state_dict(),
+            'discriminator': self.GAN.D.state_dict(),
             'timestamp': datetime.timestamp(datetime.now())
         }
 
@@ -1001,6 +1007,7 @@ class Trainer():
 
         try:
             if load_type == 'model':
+                self.load_gan_num = name
                 self.GAN.load_state_dict(load_data['GAN'])
             elif load_type == 'enc':
                 self.encoder.load_state_dict(load_data['encoder'])
