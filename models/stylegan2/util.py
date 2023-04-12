@@ -315,7 +315,7 @@ class StyleVectorizer(nn.Module): ## mapping function z->w
 
         self.condition_on_mapper = condition_on_mapper
         if condition_on_mapper:
-            emb_in = emb+condition_dim
+            emb_in = condition_dim
         else:
             emb_in = emb
             
@@ -327,7 +327,8 @@ class StyleVectorizer(nn.Module): ## mapping function z->w
 
     def forward(self, x, labels=None):
         if self.condition_on_mapper:
-            x = torch.cat([x, labels], dim=1).float()
+            x = labels
+#             x = torch.cat([x, labels], dim=1).float()
             
         x = F.normalize(x, dim=1)
         x = self.net(x)

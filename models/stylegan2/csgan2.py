@@ -126,7 +126,7 @@ class Generator(nn.Module):
         x = self.initial_conv(x)
 
         for style, block, attn in zip(styles, self.blocks, self.attns):
-            style = style if self.condition_on_mapper else torch.cat((style, conditions), 1).float()
+#             style = style if self.condition_on_mapper else torch.cat((style, conditions), 1).float()
             if exists(attn):
                 x = attn(x)
             x, rgb = block(x, rgb, style, input_noise)
@@ -174,7 +174,10 @@ class Discriminator(nn.Module):
 
         self.final_conv = nn.Conv2d(chan_last, chan_last, 3, padding=1)
         self.flatten = Flatten()
-        self.to_logit = nn.Linear(latent_dim + condition_dim, 1)
+        
+        self.phi = nn.Linear(latent_dim, condition_dim)
+        self.psix = nn.Linear(condition_dim, 1)
+        self.psiy = nn.Linear(condition_dim, 1)
 
     def forward(self, x, conditions):
         b, *_ = x.shape
@@ -193,9 +196,15 @@ class Discriminator(nn.Module):
 
         x = self.final_conv(x)
         x = self.flatten(x)
-        x = torch.cat([x, conditions], dim=1).float()
-        x = self.to_logit(x)
-        return x.squeeze(), quantize_loss
+        x = self.phi(x)
+        
+        out = self.psix(x) + self.psiy(x*conditions)
+        
+        return out, None
+#         x = torch.cat([x, conditions], dim=1).float()
+#         x = self.to_logit(x)
+#         return x.squeeze(), quantize_loss
+#         return x, self.to_logit(x).squeeze()
 
     
 class StyleGAN2(nn.Module):

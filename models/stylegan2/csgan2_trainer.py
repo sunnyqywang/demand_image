@@ -95,7 +95,6 @@ class Trainer():
         is_ddp = False,
         rank = 0,
         world_size = 1,
-        log = False,
         *args,
         **kwargs
     ):
@@ -190,8 +189,8 @@ class Trainer():
         self.rank = rank
         self.world_size = world_size
 
-        self.logger = aim.Session(experiment=name) if log else None
-
+        self.logger = {}
+        
     @property
     def image_extension(self):
         return 'jpg' if not self.transparent else 'png'
@@ -215,10 +214,8 @@ class Trainer():
             self.D_ddp = DDP(self.GAN.D, **ddp_kwargs)
             self.D_aug_ddp = DDP(self.GAN.D_aug, **ddp_kwargs)
 
-        if exists(self.logger):
-            self.logger.set_params(self.hparams)
-
     def write_config(self):
+        torch.save(self.dataset.demo_df, self.models_dir / 'demo_df.pt')
         self.config_path.write_text(json.dumps(self.config()))
 
     def load_config(self):
@@ -253,7 +250,7 @@ class Trainer():
             self.aug_prob = min(0.5, (1e5 - num_samples) * 3e-6)
             print(f'autosetting augmentation probability to {round(self.aug_prob * 100)}%')
 
-    def train(self):
+    def train(self, log=True):
         assert exists(self.loader), 'You must first initialize the data source with `.set_data_src(<folder of images>)`'
 
         if not exists(self.GAN):
@@ -331,8 +328,8 @@ class Trainer():
             # Get real images and demos
 
             _,image_batch,demo_batch = next(self.loader)
-            image_batch = torch.flatten(image_batch, start_dim=0, end_dim=-4)
-            demo_batch = torch.flatten(demo_batch, start_dim=0, end_dim=-2)
+            image_batch = torch.flatten(image_batch, start_dim=0, end_dim=-4).float()
+            demo_batch = torch.flatten(demo_batch, start_dim=0, end_dim=-2).float()
             demo_batch = demo_batch.cuda(self.rank)         
             image_batch = image_batch.cuda(self.rank)
             image_batch.requires_grad_()
@@ -378,7 +375,8 @@ class Trainer():
             if apply_gradient_penalty:
                 gp = gradient_penalty(image_batch, real_output)
                 self.last_gp_loss = gp.clone().detach().item()
-                self.track(self.last_gp_loss, 'GP')
+                if log:
+                    self.track(self.last_gp_loss, 'GP')
                 disc_loss = disc_loss + gp
 
             disc_loss = disc_loss / self.gradient_accumulate_every
@@ -388,7 +386,8 @@ class Trainer():
             total_disc_loss += divergence.detach().item() / self.gradient_accumulate_every
 
         self.d_loss = float(total_disc_loss)
-        self.track(self.d_loss, 'D')
+        if log:
+            self.track(self.d_loss, 'D')
 
         self.GAN.D_opt.step()
 
@@ -399,8 +398,8 @@ class Trainer():
         for i in gradient_accumulate_contexts(self.gradient_accumulate_every, self.is_ddp, ddps=[S, G, D_aug]):
             
             _,image_batch,demo_batch = next(self.loader)
-            image_batch = torch.flatten(image_batch, start_dim=0, end_dim=-4)
-            demo_batch = torch.flatten(demo_batch, start_dim=0, end_dim=-2)
+            image_batch = torch.flatten(image_batch, start_dim=0, end_dim=-4).float()
+            demo_batch = torch.flatten(demo_batch, start_dim=0, end_dim=-2).float()
             demo_batch = demo_batch.cuda(self.rank)         
             image_batch = image_batch.cuda(self.rank)
             image_batch.requires_grad_()
@@ -410,7 +409,7 @@ class Trainer():
             w_space = latent_to_w(S, style, demo_batch)           
             w_styles = styles_def_to_tensor(w_space)
             noise = image_noise(batch_size, image_size, device=self.rank)
-
+            
             generated_images = G(w_styles, noise, demo_batch)
 #             fake_images_to_disc = torch.cat([generated_images.clone().detach(), demo_conv], 1).float()
             fake_images_to_disc = generated_images
@@ -452,13 +451,15 @@ class Trainer():
             total_gen_loss += loss.detach().item() / self.gradient_accumulate_every
 
         self.g_loss = float(total_gen_loss)
-        self.track(self.g_loss, 'G')
+        
+        if log:
+            self.track(self.g_loss, 'G')
 
         self.GAN.G_opt.step()
 
         # calculate moving averages
 
-        if apply_path_penalty and not np.isnan(avg_pl_length):
+        if apply_path_penalty and not np.isnan(avg_pl_length) and log:
             self.pl_mean = self.pl_length_ma.update_average(self.pl_mean, avg_pl_length)
             self.track(self.pl_mean, 'PL')
 
@@ -506,8 +507,9 @@ class Trainer():
         num_layers = self.GAN.G.num_layers
 
         # latents and noise
-        noise_demo = self.dataset.demo_df[:num_rows,:]        
-        demo_batch = noise_demo.repeat_interleave(num_rows, dim=0).cuda(self.rank)
+#         noise_demo = self.dataset.demo_df[:num_rows,:]        
+        noise_demo = self.dataset.demo_df[[1095, 1093, 299, 491, 626, 1184, 1328, 311]]
+        demo_batch = noise_demo.repeat_interleave(num_rows, dim=0).float().cuda(self.rank)
         latents = noise_list(num_rows ** 2, num_layers, latent_dim, device=self.rank)       
         n = image_noise(num_rows ** 2, image_size, device=self.rank)
 
@@ -515,8 +517,10 @@ class Trainer():
         generated_images = self.generate_truncated(self.GAN.S, self.GAN.G, latents, n, demo_batch, trunc_psi = self.trunc_psi)
         
         torchvision.utils.save_image(generated_images, str(self.results_dir / self.name / f'{str(num)}.{ext}'), nrow=num_rows)
-            
-        return demo_batch
+        
+        fake_output, fake_q_loss = self.GAN.D_aug(generated_images, conditions = demo_batch, detach = True)
+
+        return fake_output
         # moving averages
 #         generated_images = self.generate_truncated(self.GAN.SE, self.GAN.GE, latents, n, demo_batch, trunc_psi = self.trunc_psi)
 #         torchvision.utils.save_image(generated_images, str(self.results_dir / self.name / f'{str(num)}-ema.{ext}'), nrow=num_rows)
@@ -732,9 +736,10 @@ class Trainer():
         print(log)
 
     def track(self, value, name):
-        if not exists(self.logger):
-            return
-        self.logger.track(value, name = name)
+        if name not in self.logger.keys():
+            self.logger[name] = [value]
+        else:
+            self.logger[name].append(value)
 
     def model_name(self, num=None):
         if num is None:

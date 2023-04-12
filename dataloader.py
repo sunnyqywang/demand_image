@@ -282,8 +282,9 @@ def load_demo_v2(data_dir):
     # Smart Locations from EPA
     epa = pd.read_csv(data_dir+"EPA_SmartLocations_CensusTract_export.csv")
     # log_tranform
-    epa['activity_density'] = np.log(epa['activity_density'])
-    
+#     epa['activity_density'] = np.log(epa['activity_density'])
+#     epa['auto_oriented'] = np.log(epa['auto_oriented'])
+
     # Pollution PM2.5
     pm = pd.read_csv(data_dir+"PM2.5_Concentrations_2016_Illinois_Average_Annual.csv")
     pm['ctfips'] = pm['ctfips'] % 1e6
@@ -293,26 +294,32 @@ def load_demo_v2(data_dir):
     # ACS Demo
     acs = pd.read_csv(data_dir+"demo_tract.csv")
     acs['pop_density'] = acs['tot_population'] / acs['area']
+#     acs['pop_density'] = np.log(acs['pop_density'])
     demo_df = pd.merge(demo_df, acs, left_on=['COUNTYFP','TRACTCE'], right_on=['COUNTYA','TRACTA'])
 
     # normalize
     real_columns = ['activity_density','auto_oriented','multi_modal','pedestrian_oriented','PM2.5']
     real_columns += ['pop_density','inc_per_capita']
 
+#     return demo_df, None
+
     for c in real_columns:
         # demo_df[c] = (demo_df[c] - demo_df[c].mean())/demo_df[c].std()
-        demo_df[c] = demo_df[c]/demo_df[c].max()
+        demo_df[c] = (demo_df[c]-demo_df[c].min())/(demo_df[c].max()-demo_df[c].min())
         demo_df[c] = (demo_df[c]-0.5)/0.5
 
     pct_columns = ['employment_entropy','pop_income_entropy','wrk_emp_balance']
     pct_columns += ['pct25_34yrs','pct35_50yrs','pctover65yrs',
                  'pctwhite_alone','pct_nonwhite']
     for c in pct_columns:
+        demo_df[c] = (demo_df[c]-demo_df[c].min())/(demo_df[c].max()-demo_df[c].min())
         demo_df[c] = (demo_df[c] - 0.5)/0.5
 
-    columns = ['pop_density','inc_per_capita','pct25_34yrs','pct35_50yrs','pctover65yrs',
-                 'pctwhite_alone','pct_nonwhite']
-
+#     columns = ['pop_density','inc_per_capita','pct25_34yrs','pct35_50yrs','pctover65yrs',
+#                  'pctwhite_alone','pct_nonwhite']
+    columns = ['activity_density','multi_modal','pedestrian_oriented','PM2.5',
+               'inc_per_capita','employment_entropy','wrk_emp_balance','pct25_34yrs']
+    
     return demo_df, columns
 
 def load_demo_v1(data_dir, norm=2):
