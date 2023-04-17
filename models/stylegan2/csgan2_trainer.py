@@ -95,9 +95,12 @@ class Trainer():
         is_ddp = False,
         rank = 0,
         world_size = 1,
+        random_dist = 'norm',
         *args,
         **kwargs
     ):
+        
+        self.random_dist = random_dist
         self.GAN_params = [args, kwargs]
         self.GAN = None
 
@@ -337,7 +340,8 @@ class Trainer():
 
             # Get latents and generate images
             get_latents_fn = mixed_list if random() < self.mixed_prob else noise_list
-            style = get_latents_fn(batch_size, num_layers, latent_dim, device=self.rank)
+            ## ##### !!!!!
+            style = get_latents_fn(batch_size, num_layers, self.condition_dim, device=self.rank, dist=self.random_dist)
             w_space = latent_to_w(S, style, demo_batch)
             w_styles = styles_def_to_tensor(w_space)
             noise = image_noise(batch_size, image_size, device=self.rank)
@@ -405,7 +409,9 @@ class Trainer():
             image_batch.requires_grad_()
             batch_size = len(image_batch)
            
-            style = get_latents_fn(batch_size, num_layers, latent_dim, device=self.rank)
+        
+            ### !!!!!
+            style = get_latents_fn(batch_size, num_layers, self.condition_dim, device=self.rank, dist=self.random_dist)
             w_space = latent_to_w(S, style, demo_batch)           
             w_styles = styles_def_to_tensor(w_space)
             noise = image_noise(batch_size, image_size, device=self.rank)
@@ -510,7 +516,8 @@ class Trainer():
 #         noise_demo = self.dataset.demo_df[:num_rows,:]        
         noise_demo = self.dataset.demo_df[[1095, 1093, 299, 491, 626, 1184, 1328, 311]]
         demo_batch = noise_demo.repeat_interleave(num_rows, dim=0).float().cuda(self.rank)
-        latents = noise_list(num_rows ** 2, num_layers, latent_dim, device=self.rank)       
+        ## !!!!!
+        latents = noise_list(num_rows ** 2, num_layers, self.condition_dim, device=self.rank, dist=self.random_dist) 
         n = image_noise(num_rows ** 2, image_size, device=self.rank)
 
         # regular
@@ -520,7 +527,7 @@ class Trainer():
         
         fake_output, fake_q_loss = self.GAN.D_aug(generated_images, conditions = demo_batch, detach = True)
 
-        return fake_output
+#         return latents
         # moving averages
 #         generated_images = self.generate_truncated(self.GAN.SE, self.GAN.GE, latents, n, demo_batch, trunc_psi = self.trunc_psi)
 #         torchvision.utils.save_image(generated_images, str(self.results_dir / self.name / f'{str(num)}-ema.{ext}'), nrow=num_rows)
@@ -607,10 +614,11 @@ class Trainer():
     def truncate_style(self, tensor, trunc_psi = 0.75):
         S = self.GAN.S
         batch_size = self.batch_size
-        latent_dim = self.GAN.G.latent_dim if self.condition_on_mapper else self.GAN.G.latent_dim - self.GAN.G.condition_dim
+        latent_dim = self.GAN.G.latent_dim #if self.condition_on_mapper else self.GAN.G.latent_dim - self.GAN.G.condition_dim
 
         if not exists(self.av):
-            z = noise(2000, latent_dim, device=self.rank)
+            #### !!!!!
+            z = noise(2000, self.condition_dim, device=self.rank)
             demo_sample = torch.randn(2000, self.condition_dim).cuda(self.rank)
             samples = evaluate_in_chunks(batch_size, S, z, demo_sample).cpu().numpy()
             self.av = np.mean(samples, axis = 0)
@@ -631,7 +639,8 @@ class Trainer():
     @torch.no_grad()
     def generate_truncated(self, S, G, style, noi, condition, trunc_psi = 0.75, num_image_tiles = 8, demo_batch = None):
         w = map(lambda t: (S(t[0], condition), t[1]), style)
-        w_truncated = self.truncate_style_defs(w, trunc_psi = trunc_psi)
+#         w_truncated = self.truncate_style_defs(w, trunc_psi = trunc_psi)
+        w_truncated = w
         w_styles = styles_def_to_tensor(w_truncated)
         generated_images = evaluate_in_chunks(self.batch_size, G, w_styles, noi, condition)
 

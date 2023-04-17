@@ -68,7 +68,7 @@ class Generator(nn.Module):
     def __init__(self, image_size, latent_dim, condition_dim, condition_on_mapper, network_capacity = 16, conditional = False, transparent = False, attn_layers = [], no_const = False, fmap_max = 512, *args, **kwargs):
         super().__init__()
         self.image_size = image_size
-        self.latent_dim = latent_dim if condition_on_mapper else latent_dim + condition_dim
+        self.latent_dim = latent_dim #if condition_on_mapper else latent_dim + condition_dim
         self.num_layers = int(log2(image_size) - 1)
         self.condition_dim = condition_dim
         self.condition_on_mapper = condition_on_mapper

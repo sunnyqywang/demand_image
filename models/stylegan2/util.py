@@ -200,15 +200,18 @@ def calc_pl_lengths(styles, images):
 
     return (pl_grads ** 2).sum(dim=2).mean(dim=1).sqrt()
 
-def noise(n, latent_dim, device):
-    return torch.randn(n, latent_dim).cuda(device)
+def noise(n, latent_dim, device, dist='norm'):
+    if dist == 'norm':
+        return torch.randn(n, latent_dim).cuda(device)
+    elif dist == 'uniform':
+        return torch.FloatTensor(n, latent_dim).uniform_(-1,1).cuda(device)
     
-def noise_list(n, layers, latent_dim, device):
-    return [(noise(n, latent_dim, device), layers)]
+def noise_list(n, layers, latent_dim, device, dist='norm'):
+    return [(noise(n, latent_dim, device, dist), layers)]
 
-def mixed_list(n, layers, latent_dim, device):
+def mixed_list(n, layers, latent_dim, device, dist='norm'):
     tt = int(torch.rand(()).numpy() * layers)
-    return noise_list(n, tt, latent_dim, device) + noise_list(n, layers - tt, latent_dim, device)
+    return noise_list(n, tt, latent_dim, device, dist) + noise_list(n, layers - tt, latent_dim, device, dist='norm')
 
 def latent_to_w(style_vectorizer, latent_descr, condition=None):
     return [(style_vectorizer(z, condition), num_layers) for z, num_layers in latent_descr]
@@ -317,7 +320,7 @@ class StyleVectorizer(nn.Module): ## mapping function z->w
         if condition_on_mapper:
             emb_in = condition_dim
         else:
-            emb_in = emb
+            emb_in = 2* condition_dim
             
         layers = [EqualLinear(emb_in, emb, lr_mul), leaky_relu()]
         for i in range(depth-1):
@@ -326,9 +329,11 @@ class StyleVectorizer(nn.Module): ## mapping function z->w
         self.net = nn.Sequential(*layers)
 
     def forward(self, x, labels=None):
+
         if self.condition_on_mapper:
             x = labels
-#             x = torch.cat([x, labels], dim=1).float()
+        else:
+            x = torch.cat([x, labels], dim=1).float()
             
         x = F.normalize(x, dim=1)
         x = self.net(x)

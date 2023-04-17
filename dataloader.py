@@ -58,8 +58,10 @@ class ImageHDF5(Dataset):
             self.demo_df, self.columns = load_demo_v2(data_dir)
             if columns is not None:
                 self.columns = columns
+                
             temp = self.data_info.drop_duplicates(subset=['state','county','tract'])
-            self.demo_df = pd.merge(temp, self.demo_df, how='left', left_on=['state','county','tract'], right_on=['STATEFP','COUNTYFP','TRACTCE']).fillna(0)
+            self.demo_df = pd.merge_ordered(temp, self.demo_df, how='left', left_on=['state','county','tract'], right_on=['STATEFP','COUNTYFP','TRACTCE']).fillna(0)
+            
             self.demo_df = torch.tensor(self.demo_df[self.columns].to_numpy())
             
             # print(self.demo_df)
@@ -80,7 +82,7 @@ class ImageHDF5(Dataset):
             data = torch.tensor(data)
     
         if self.demo:
-            demo_i = i // self.demo_step
+            demo_i = i // (self.demo_step // self.shuffle_unit)
             demo = self.demo_df[demo_i,:]
             demo = torch.tile(demo, (self.shuffle_unit,1))
             
