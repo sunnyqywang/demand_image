@@ -586,7 +586,7 @@ class Trainer():
         self.test_dataloader = data.DataLoader(self.test_dataset, num_workers = 0, batch_size = batch_size, shuffle = not self.is_ddp, drop_last = True, pin_memory = True)
         
       
-    def train_encoder_only(self, train=True, log=True):
+    def train_encoder_only(self, train=True):
                 
         assert exists(self.GAN), 'Must load trained StylEx G, D, and S to train encoder only'
         
@@ -764,12 +764,7 @@ class Trainer():
             self.tb_writer.add_scalar('loss/rec', self.total_rec_loss, self.steps)
 #             self.tb_writer.add_scalar('loss/kl', self.total_kl_loss, self.steps)
 
-        if log:
-            self.track(self.total_gen_disc_loss, "G")
-            self.track(self.total_l1, "Rec_pips")
-            self.track(self.total_l2, "Rec_w")
-            self.track(self.total_l3, "Rec_i")
-            self.track(self.total_rec_loss, 'Rec')
+        
 
 #         self.track(self.total_kl_loss, 'KL')
 
@@ -924,6 +919,12 @@ class Trainer():
         data = [d for d in data if exists(d[1])]
         log = ' | '.join(map(lambda n: f'{n[0]}: {n[1]:.2f}', data))
         print(log)
+        
+        self.track(self.total_gen_disc_loss, "G")
+        self.track(self.total_l1, "Rec_pips")
+        self.track(self.total_l2, "Rec_w")
+        self.track(self.total_l3, "Rec_i")
+        self.track(self.total_rec_loss, 'Rec')
 
     def track(self, value, name):
         
@@ -1011,6 +1012,10 @@ class Trainer():
                 self.GAN.load_state_dict(load_data['GAN'])
             elif load_type == 'enc':
                 self.encoder.load_state_dict(load_data['encoder'])
+                self.logger = load_data['logger']
+                self.rec_scaling = load_data['rec_scaling']
+                self.GAN.D.load_state_dict(load_data['discriminator'])
+                self.GAN.D_aug = self.GAN.D
         except Exception as e:
             print('unable to load saved model. please try downgrading the package to the version specified by the saved model')
             raise e

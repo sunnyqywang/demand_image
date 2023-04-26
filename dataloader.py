@@ -364,7 +364,7 @@ def load_demo_v1(data_dir, norm=2):
 #     demo_np = demo_df[['pop_density','pct25_34yrs','pct35_50yrs','pctover65yrs',
 #              'pctwhite_alone','pct_nonwhite','inc_per_capita']].to_numpy()
 
-# 10 variables version
+# # 10 variables version
     demo_np = demo_df[['pop_density','pct25_34yrs','pct35_50yrs','pctover65yrs',
                  'pctwhite_alone','pct_nonwhite',
                  'pctblack_alone',

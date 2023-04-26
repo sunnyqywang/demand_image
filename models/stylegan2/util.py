@@ -313,14 +313,14 @@ class EqualLinear(nn.Module):
         return F.linear(input, self.weight * self.lr_mul, bias=self.bias * self.lr_mul)
 
 class StyleVectorizer(nn.Module): ## mapping function z->w
-    def __init__(self, emb, depth, condition_dim, condition_on_mapper, lr_mul = 0.1):
+    def __init__(self, emb, depth, condition_dim, random_dim, condition_on_mapper, lr_mul = 0.1):
         super().__init__()
 
         self.condition_on_mapper = condition_on_mapper
         if condition_on_mapper:
             emb_in = condition_dim
         else:
-            emb_in = 2* condition_dim
+            emb_in = random_dim + condition_dim
             
         layers = [EqualLinear(emb_in, emb, lr_mul), leaky_relu()]
         for i in range(depth-1):

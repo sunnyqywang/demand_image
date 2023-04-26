@@ -131,7 +131,7 @@ class Discriminator(nn.Module):
             n_channels = n_channels * 2
         
         if self.model_class == 'gan':
-            layers.append(nn.Conv2d(n_channels, 1, 4, 1, 0, bias=False))
+            layers.append(nn.Conv2d(n_channels, nz, 4, 1, 0, bias=False))
         else:
             assert nz <= ndf*(2**(num_layers))
             layers.append(nn.Conv2d(n_channels, nz, 4, 1, 0, bias=False))
@@ -160,11 +160,11 @@ class Discriminator(nn.Module):
         
         
         if self.model_class == 'gan':
-#             self.classification = nn.Sequential(
-#                 nn.Conv2d(nz, 1, 1, 1, 0, bias=False),
-#                 nn.Sigmoid()
-#             )
-            self.classification = nn.Sigmoid()
+            self.classification = nn.Sequential(
+                nn.Conv2d(nz, 1, 1, 1, 0, bias=False),
+                nn.Sigmoid()
+            )
+#             self.classification = nn.Sigmoid()
         
         self.apply(weights_init)
 

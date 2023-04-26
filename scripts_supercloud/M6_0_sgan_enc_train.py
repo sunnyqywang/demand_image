@@ -57,7 +57,7 @@ def encoder_training(rank, world_size, model_args, data, gan_load_from, enc_load
         model.train_encoder_only()
         if is_main and model.steps % 500 == 0:
             model.print_log()
-
+            
     model.save(model.checkpoint_num)
 
     if is_ddp:

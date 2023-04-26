@@ -208,17 +208,17 @@ class Discriminator(nn.Module):
 
     
 class StyleGAN2(nn.Module):
-    def __init__(self, image_size, condition_dim, condition_on_mapper, latent_dim = 512, fmap_max = 512, style_depth = 8, network_capacity = 16, transparent = False, fp16 = False, cl_reg = False, steps = 1, lr = 1e-4, ttur_mult = 2, fq_layers = [], fq_dict_size = 256, attn_layers = [], no_const = False, lr_mlp = 0.1, rank = 0, *args, **kwargs):
+    def __init__(self, image_size, condition_dim, random_dim, condition_on_mapper, latent_dim = 512, fmap_max = 512, style_depth = 8, network_capacity = 16, transparent = False, fp16 = False, cl_reg = False, steps = 1, lr = 1e-4, ttur_mult = 2, fq_layers = [], fq_dict_size = 256, attn_layers = [], no_const = False, lr_mlp = 0.1, rank = 0, *args, **kwargs):
         super().__init__()
         self.lr = lr
         self.steps = steps
         self.ema_updater = EMA(0.995)
             
-        self.S = StyleVectorizer(latent_dim, style_depth, condition_dim, condition_on_mapper, lr_mul = lr_mlp)
+        self.S = StyleVectorizer(latent_dim, style_depth, condition_dim, random_dim, condition_on_mapper, lr_mul = lr_mlp)
         self.G = Generator(image_size, latent_dim, condition_dim, condition_on_mapper, network_capacity, transparent = transparent, attn_layers = attn_layers, no_const = no_const, fmap_max = fmap_max, *args, **kwargs)
         self.D = Discriminator(image_size, condition_dim, condition_on_mapper, network_capacity, fq_layers = fq_layers, fq_dict_size = fq_dict_size, attn_layers = attn_layers, transparent = transparent, fmap_max = fmap_max, *args, **kwargs)
 
-        self.SE = StyleVectorizer(latent_dim, style_depth, lr_mul = lr_mlp, condition_dim = condition_dim, condition_on_mapper = condition_on_mapper)
+        self.SE = StyleVectorizer(latent_dim, style_depth, lr_mul = lr_mlp, condition_dim = condition_dim, random_dim = random_dim, condition_on_mapper = condition_on_mapper)
         self.GE = Generator(image_size, latent_dim, condition_dim, condition_on_mapper, network_capacity, transparent = transparent, attn_layers = attn_layers, no_const = no_const, *args, **kwargs)
 
         self.D_cl = None

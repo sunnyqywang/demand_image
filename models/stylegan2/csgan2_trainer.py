@@ -59,6 +59,7 @@ class Trainer():
         base_dir = './',
         image_size = 128,
         condition_dim = 0, # condition dimension
+        random_dim = 0,
         condition_on_mapper = False, # where condition is applied (on z or w)
         network_capacity = 16,
         fmap_max = 512,
@@ -119,6 +120,7 @@ class Trainer():
         assert log2(image_size).is_integer(), 'image size must be a power of 2 (64, 128, 256, 512, 1024)'
         self.image_size = image_size
         self.condition_dim = condition_dim
+        self.random_dim = random_dim
         self.condition_on_mapper = condition_on_mapper
         self.network_capacity = network_capacity
         self.fmap_max = fmap_max
@@ -208,7 +210,7 @@ class Trainer():
         
     def init_GAN(self):
         args, kwargs = self.GAN_params
-        self.GAN = StyleGAN2(lr = self.lr, lr_mlp = self.lr_mlp, ttur_mult = self.ttur_mult, image_size = self.image_size, condition_dim = self.condition_dim, condition_on_mapper = self.condition_on_mapper, network_capacity = self.network_capacity, fmap_max = self.fmap_max, transparent = self.transparent, fq_layers = self.fq_layers, fq_dict_size = self.fq_dict_size, attn_layers = self.attn_layers, fp16 = self.fp16, cl_reg = self.cl_reg, no_const = self.no_const, rank = self.rank, *args, **kwargs)
+        self.GAN = StyleGAN2(lr = self.lr, lr_mlp = self.lr_mlp, ttur_mult = self.ttur_mult, image_size = self.image_size, condition_dim = self.condition_dim, random_dim = self.random_dim, condition_on_mapper = self.condition_on_mapper, network_capacity = self.network_capacity, fmap_max = self.fmap_max, transparent = self.transparent, fq_layers = self.fq_layers, fq_dict_size = self.fq_dict_size, attn_layers = self.attn_layers, fp16 = self.fp16, cl_reg = self.cl_reg, no_const = self.no_const, rank = self.rank, *args, **kwargs)
 
         if self.is_ddp:
             ddp_kwargs = {'device_ids': [self.rank]}
@@ -290,7 +292,7 @@ class Trainer():
             if apply_cl_reg_to_generated:
                 for i in range(self.gradient_accumulate_every):
                     get_latents_fn = mixed_list if random() < self.mixed_prob else noise_list
-                    style = get_latents_fn(batch_size, num_layers, latent_dim, device=self.rank)
+                    style = get_latents_fn(batch_size, num_layers, latent_dim=self.random_dim, device=self.rank)
                     noise = image_noise(batch_size, image_size, device=self.rank)
 
                     w_space = latent_to_w(self.GAN.S, style)
@@ -341,7 +343,7 @@ class Trainer():
             # Get latents and generate images
             get_latents_fn = mixed_list if random() < self.mixed_prob else noise_list
             ## ##### !!!!!
-            style = get_latents_fn(batch_size, num_layers, self.condition_dim, device=self.rank, dist=self.random_dist)
+            style = get_latents_fn(batch_size, num_layers, self.random_dim, device=self.rank, dist=self.random_dist)
             w_space = latent_to_w(S, style, demo_batch)
             w_styles = styles_def_to_tensor(w_space)
             noise = image_noise(batch_size, image_size, device=self.rank)
@@ -411,7 +413,7 @@ class Trainer():
            
         
             ### !!!!!
-            style = get_latents_fn(batch_size, num_layers, self.condition_dim, device=self.rank, dist=self.random_dist)
+            style = get_latents_fn(batch_size, num_layers, self.random_dim, device=self.rank, dist=self.random_dist)
             w_space = latent_to_w(S, style, demo_batch)           
             w_styles = styles_def_to_tensor(w_space)
             noise = image_noise(batch_size, image_size, device=self.rank)
@@ -517,7 +519,7 @@ class Trainer():
         noise_demo = self.dataset.demo_df[[1095, 1093, 299, 491, 626, 1184, 1328, 311]]
         demo_batch = noise_demo.repeat_interleave(num_rows, dim=0).float().cuda(self.rank)
         ## !!!!!
-        latents = noise_list(num_rows ** 2, num_layers, self.condition_dim, device=self.rank, dist=self.random_dist) 
+        latents = noise_list(num_rows ** 2, num_layers, self.random_dim, device=self.rank, dist=self.random_dist) 
         n = image_noise(num_rows ** 2, image_size, device=self.rank)
 
         # regular
@@ -618,7 +620,7 @@ class Trainer():
 
         if not exists(self.av):
             #### !!!!!
-            z = noise(2000, self.condition_dim, device=self.rank)
+            z = noise(2000, self.random_dim, device=self.rank)
             demo_sample = torch.randn(2000, self.condition_dim).cuda(self.rank)
             samples = evaluate_in_chunks(batch_size, S, z, demo_sample).cpu().numpy()
             self.av = np.mean(samples, axis = 0)

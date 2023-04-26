@@ -155,7 +155,7 @@ def dcgan_config(args):
 
     optim_config = OrderedDict([
         ('epochs', args.epochs),
-        ('batch_size', 16),
+        ('batch_size', 64),
         ('base_lr', args.base_lr),
         ('weight_decay', args.weight_decay),
     ])
