@@ -65,8 +65,8 @@ def reconstruction_loss(encoder_batch: torch.Tensor, generated_images: torch.Ten
 
     # LPIPS reconstruction loss
     loss1 = 0.1 * lpips_loss(encoder_batch_norm, generated_images_norm).mean() 
-    loss2 = 0.1 * l1_loss(encoder_w, generated_images_w) 
-    loss3 = 1 * l1_loss(encoder_batch, generated_images)
+    loss2 = l1_loss(encoder_w, generated_images_w) 
+    loss3 = l1_loss(encoder_batch, generated_images)
     # loss = loss1 + loss2 + loss3
 #     loss = loss1 + loss3
 #     loss = loss2 + loss3
@@ -382,6 +382,7 @@ class Trainer():
         rank = 0,
         world_size = 1,
         rec_scaling = 1,
+        rec_w_scaling = 1,
         *args,
         **kwargs
     ):
@@ -481,6 +482,7 @@ class Trainer():
 
         self.encoder_class = encoder_class
         self.rec_scaling = rec_scaling
+        self.rec_w_scaling = rec_w_scaling
         
         self.lpips_loss = lpips.LPIPS(net="alex").cuda(self.rank) # image should be RGB, IMPORTANT: normalized to [-1,1]
         self.tb_writer = None
@@ -669,7 +671,6 @@ class Trainer():
             if apply_gradient_penalty:
                 gp = gradient_penalty(image_batch, real_output)
                 self.last_gp_loss = gp.clone().detach().item()
-                self.track(self.last_gp_loss, 'GP')
                 disc_loss = disc_loss + gp
 
             disc_loss = disc_loss / self.gradient_accumulate_every
@@ -679,7 +680,6 @@ class Trainer():
             total_disc_loss += divergence.detach().item() / self.gradient_accumulate_every
 
         self.d_loss = float(total_disc_loss)
-        self.track(self.d_loss, 'D')
 
         if train:
             self.GAN.D_opt.step()
@@ -720,7 +720,7 @@ class Trainer():
             l1 = l1 / self.gradient_accumulate_every
             l2 = l2 / self.gradient_accumulate_every
             l3 = l3 / self.gradient_accumulate_every
-            rec_loss = self.rec_scaling * (l1+l2+l3)
+            rec_loss = self.rec_scaling * (l1+self.rec_w_scaling*l2+l3)
                         
             gen_disc_loss = G_loss_fn(fake_output, real_output) / self.gradient_accumulate_every
 
@@ -763,8 +763,6 @@ class Trainer():
         if exists(self.tb_writer):
             self.tb_writer.add_scalar('loss/rec', self.total_rec_loss, self.steps)
 #             self.tb_writer.add_scalar('loss/kl', self.total_kl_loss, self.steps)
-
-        
 
 #         self.track(self.total_kl_loss, 'KL')
 
@@ -919,12 +917,14 @@ class Trainer():
         data = [d for d in data if exists(d[1])]
         log = ' | '.join(map(lambda n: f'{n[0]}: {n[1]:.2f}', data))
         print(log)
-        
         self.track(self.total_gen_disc_loss, "G")
         self.track(self.total_l1, "Rec_pips")
         self.track(self.total_l2, "Rec_w")
         self.track(self.total_l3, "Rec_i")
         self.track(self.total_rec_loss, 'Rec')
+        self.track(self.d_loss, "D")
+        self.track(self.last_gp_loss, "GP")
+
 
     def track(self, value, name):
         

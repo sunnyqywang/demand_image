@@ -68,7 +68,7 @@ if __name__ == '__main__':
     results_dir = out_dir
     models_dir = model_dir
     stylegan_name = '2303-2'
-    encoder_name = '0402'
+    encoder_name = '0426-50'
 
     # GAN
     gan_load_from = 100
@@ -82,7 +82,7 @@ if __name__ == '__main__':
     transparent = False
     batch_size = 4
     gradient_accumulate_every = 6
-    num_train_steps = 150000
+    num_train_steps = 100000
     learning_rate = 1e-5
     lr_mlp = 0.1
     ttur_mult = 1.5
@@ -117,11 +117,10 @@ if __name__ == '__main__':
     calculate_fid_num_images = 12800
     clear_fid_cache = False
     seed = 42
-    log = False
 
     # A global scale to the custom losses
-    kl_scaling=1
-    rec_scaling=1
+    rec_w_scaling=1
+    rec_scaling=50
 
     # If unspecified, use the Discriminator as an encoder (like the authors did).
     # This is the way to go if we want to be close to the original paper.
@@ -184,8 +183,7 @@ if __name__ == '__main__':
             calculate_fid_num_images=calculate_fid_num_images,
             clear_fid_cache=clear_fid_cache,
             mixed_prob=mixed_prob,
-            log=log,
-            kl_scaling=kl_scaling,
+            rec_w_scaling=rec_w_scaling,
             rec_scaling=rec_scaling,
     #         classifier_path=classifier_path,
     #         num_classes=num_classes,

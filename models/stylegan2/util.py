@@ -205,6 +205,8 @@ def noise(n, latent_dim, device, dist='norm'):
         return torch.randn(n, latent_dim).cuda(device)
     elif dist == 'uniform':
         return torch.FloatTensor(n, latent_dim).uniform_(-1,1).cuda(device)
+    elif dist == 'uniform0.05':
+        return torch.FloatTensor(n, latent_dim).uniform_(0.95, 1.05).cuda(device)
     
 def noise_list(n, layers, latent_dim, device, dist='norm'):
     return [(noise(n, latent_dim, device, dist), layers)]
@@ -320,7 +322,8 @@ class StyleVectorizer(nn.Module): ## mapping function z->w
         if condition_on_mapper:
             emb_in = condition_dim
         else:
-            emb_in = random_dim + condition_dim
+            # emb_in = random_dim + condition_dim
+            emb_in = condition_dim
             
         layers = [EqualLinear(emb_in, emb, lr_mul), leaky_relu()]
         for i in range(depth-1):
@@ -333,7 +336,8 @@ class StyleVectorizer(nn.Module): ## mapping function z->w
         if self.condition_on_mapper:
             x = labels
         else:
-            x = torch.cat([x, labels], dim=1).float()
+            # x = torch.cat([x, labels], dim=1).float()
+            x = x * labels
             
         x = F.normalize(x, dim=1)
         x = self.net(x)
