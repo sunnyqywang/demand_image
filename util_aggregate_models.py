@@ -21,17 +21,19 @@ def mnl_torch(trainloader, testloader, n_features, sst_train, sst_test, lr_list,
     
     for (lr, wd) in itertools.product(lr_list, wd_list):
         print(f"[lr: {lr:.2e}, wd: {wd:.2e}]")
-
+        
+        train_loss_list = []
+        test_loss_list = []
+        
         # model setup
         model = mnl.MNL(n_alts=4, n_features=n_features)
         optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=wd)
 
         # model training
-
         ref1 = 0
         ref2 = 0
-
-        for epoch in range(1000):
+        
+        for epoch in range(4000):
 
             kl_ = 0
             mse_ = 0
@@ -76,7 +78,7 @@ def mnl_torch(trainloader, testloader, n_features, sst_train, sst_test, lr_list,
 
             loss_ = train_kl
 
-            if epoch % 5 == 0:
+            if epoch % 10 == 0:
 
                 kl_ = 0
                 mse_ = 0 
@@ -117,13 +119,16 @@ def mnl_torch(trainloader, testloader, n_features, sst_train, sst_test, lr_list,
                 r3 = 1-mse3_/sst_test[2]
                 r4 = 1-mse4_/sst_test[3]
             
+                train_loss_list.append(train_kl)
+                test_loss_list.append(test_kl)
+                
                 if epoch >= 40:
                     if (np.abs(loss_ - ref1)/ref1<0.001) & (np.abs(loss_ - ref2)/ref2<0.001):
                         print("Early stopping at epoch", epoch)
                         break
-                    if (ref1 < loss_) & (ref1 < ref2):
-                        print("Diverging. stop.")
-                        break
+#                     if (ref1 < loss_) & (ref1 < ref2):
+#                         print("Diverging. stop.")
+#                         break
                     if loss_ < best:
                         best = loss_
                         best_epoch = epoch
@@ -144,12 +149,13 @@ def mnl_torch(trainloader, testloader, n_features, sst_train, sst_test, lr_list,
         print()
         
         if save_models:
-            torch.save(model.state_dict(), out_dir+"models/"+save_name+"_"+str(lr)+"_"+str(wd)+".pt")
+            torch.save(model.state_dict(), out_dir+"mnl_models/"+save_name+"_"+str(lr)+"_"+str(wd)+".pt")
             
         ret_dict = {
             'train_kl_loss': output[0], 'test_kl_loss': output[6],
             'train_r2_auto': output[13], 'train_r2_active': output[12], 'train_r2_pt': output[15],
             'test_r2_auto': output[17], 'test_r2_active': output[16], 'test_r2_pt': output[19],
+            'train_loss': train_loss_list, 'test_loss': test_loss_list,
         }
         
         all_dict[(lr,wd)] = ret_dict

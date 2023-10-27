@@ -1,3 +1,4 @@
+from PIL import Image
 import numpy as np
 import pandas as pd
 
@@ -16,7 +17,7 @@ from setup import data_dir
 
 class ImageDataset(Dataset):
 
-    def __init__(self, image_dir, data_dir, train, data_version, transform=None, sampling='clustered', image_type='png', augment=None, demo=-1):
+    def __init__(self, image_dir, data_dir, image_size, train, data_version, sampling='clustered', image_type='png', augment=None, demo=-1):
         """
         Args:
             image_dir (string): Directory with all the images.
@@ -24,33 +25,41 @@ class ImageDataset(Dataset):
                 on a sample.
         """
         self.image_dir = image_dir
-        self.transform = transform
+        self.image_size = image_size
         self.augment = augment
         
-        data = pd.read_csv(data_dir+"census_tracts_filtered-"+data_version+".csv")
-        self.image_list = []
-
+        image_list = glob.glob(self.image_dir + "*.png")
+        image_list += glob.glob(self.image_dir + "*.jpg")
+        self.image_df = pd.DataFrame(image_list, columns=['img_dir'])
+        self.image_df['geoid'] = [img_name[img_name.rfind('/') + 1:img_name.rfind('_')] for img_name in image_list]
+        self.image_df['idx'] = [int(img_name[img_name.rfind('_') + 1:img_name.rfind('.')]) for img_name in image_list]
+        
+        # filter images based on survey availability and train/test split
+        data = pd.read_csv(data_dir+"TrainTestSplit/census_tracts_filtered-"+data_version+".csv")
+        data['geoid'] = [str(s)+'_'+str(c)+'_'+str(t) for (s,c,t) in zip(data['state_fips'], data['county_fips'], data['tract_fips'])]
+            
         if sampling == 'clustered':
+
             if train:
-                data = data[data['train_test']==0]
+                include_tract = data[data['train_test']!=0]['geoid'].tolist()
             else:
-                data = data[data['train_test']==1]
+                include_tract = data[data['train_test']==0]['geoid'].tolist()
 
-            tracts = [str(s)+'_'+str(c)+'_'+str(t) for (s,c,t) in zip(data['state_fips'], data['county_fips'], data['tract_fips'])]
-
-            for f in tracts:
-                self.image_list += glob.glob(image_dir+f+"_*."+image_type)
+            self.image_df = self.image_df[self.image_df['geoid'].isin(include_tract)]
             
         if sampling == 'stratified':
-            for f in data['geoid']:
-                im = glob.glob(image_dir+f+"_*."+image_type)
-                im = sorted(im)
-                n = int(len(im) * 0.1)
-                if train:
-                    self.image_list += im[:-n]
-                else:
-                    self.image_list += im[-n:]
-                    
+            include_tract = data['geoid'].tolist()
+        
+            self.image_df = self.image_df[self.image_df['geoid'].isin(include_tract)]
+            
+            train_split_index = int(self.image_df['idx'].max()*0.9)
+            if train:
+                self.image_df = self.image_df[self.image_df['idx'] < train_split_index]
+            else:
+                self.image_df = self.image_df[self.image_df['idx'] >= train_split_index]
+        
+        self.image_list = self.image_df['img_dir'].to_numpy()
+                
         print(len(self.image_list), "images in dataset")
         
         self.num_unique = len(self.image_list)
@@ -70,88 +79,40 @@ class ImageDataset(Dataset):
         if torch.is_tensor(idx):
             idx = idx.tolist()
 
-        img_name = os.path.join(self.image_dir, self.image_list[idx])
-        sample = cv2.imread(img_name)
+        img_name = self.image_list[idx]
+        image = Image.open(img_name)
 
-        if self.transform:
-            sample = self.transform(sample)
+        if not image.mode == "RGB":
+            image = image.convert("RGB")
             
+        image = np.array(image).astype(np.uint8)
+        image = (image.astype(np.float32) / 127.5) - 1.0
+        s = int((600 - self.image_size) // 2)
+        e = int((600 + self.image_size) // 2)
+        image = image[s:e, s:e, :]
+        
         if self.augment:
-            if idx>self.num_unique*2:
-                rotate = torchvision.transforms.RandomRotation(25)
-                sample = rotate(sample)
-            elif idx > self.num_unique:
-                hflip = torchvision.transforms.RandomHorizontalFlip(1)
-                sample = hflip(sample)
+            raise NotImplementedError()
+#             if idx>self.num_unique*2:
+#                 rotate = torchvision.transforms.RandomRotation(25)
+#                 sample = rotate(sample)
+#             elif idx > self.num_unique:
+#                 hflip = torchvision.transforms.RandomHorizontalFlip(1)
+#                 sample = hflip(sample)
         
         if self.demo >= 0:
             census_index = self.demo_cs.index(img_name[img_name.rfind('/')+1:img_name.rfind('_')])
             census_data = self.demo_np[census_index]
-            return self.image_list[idx], sample, census_data
+            return img_name, image, census_data
         else:
-            return self.image_list[idx], sample        
+            return img_name, image        
         
         
         
-def image_loader(image_dir, data_dir, batch_size, num_workers, image_size, data_version, sampling='clustered', recalculate_normalize=False, image_type='png', augment=None, norm=1, demo=False, return_dataset=False):
+def image_loader(image_dir, data_dir, batch_size, num_workers, image_size, data_version, sampling='clustered', augment=None, demo=-1, return_dataset=False):
     
-    if recalculate_normalize:
-        transform = torchvision.transforms.Compose([torchvision.transforms.ToTensor()])       
-        trainset = ImageDataset(image_dir, data_dir, train=False, transform=transform, sampling=sampling, data_version=data_version)
-        
-        all_images = trainset[0][1].reshape(3, -1)
-        for i in range(1,len(trainset)):
-            all_images = torch.cat((all_images, trainset[i][1].reshape(3, -1)), dim=1)
-        mean = torch.mean(all_images, axis=1)
-        std = torch.std(all_images, axis=1)
-
-        print("Image Mean: ", mean)
-        print("Image Std:", std)
-    else:
-        if 'zoom13' in image_dir:
-            mean = [0.3733, 0.3991, 0.3711]
-            std = [0.2173, 0.2055, 0.2143]
-        else:
-            mean = [0.3816, 0.4169, 0.3868]
-            std = [0.1960, 0.1848, 0.2052]
-            
-            
-    if norm == 1:
-        transform = torchvision.transforms.Compose([
-            torchvision.transforms.ToTensor(),
-            torchvision.transforms.CenterCrop(224),
-            torchvision.transforms.Resize(image_size),
-            torchvision.transforms.Normalize(mean, std),
-#             torchvision.transforms.RandomHorizontalFlip(),
-#             torchvision.transforms.CenterCrop(224),
-#             torchvision.transforms.Resize(image_size),
-    #         torchvision.transforms.ToTensor()
-        ])
-    elif norm == 0:
-        transform = torchvision.transforms.Compose([
-            torchvision.transforms.ToTensor(),
-#             torchvision.transforms.CenterCrop(image_size),
-#             torchvision.transforms.Normalize(mean, std),
-#             torchvision.transforms.RandomHorizontalFlip(),
-            torchvision.transforms.CenterCrop(224),
-            torchvision.transforms.Resize(image_size),
-    #         torchvision.transforms.ToTensor()
-        ])
-    elif norm == 2:
-#         normalize to [-1,+1]
-        transform = torchvision.transforms.Compose([
-            torchvision.transforms.ToTensor(),
-            torchvision.transforms.CenterCrop(224),
-            torchvision.transforms.Resize(image_size),
-            torchvision.transforms.Normalize([0.5,0.5,0.5], [0.5,0.5,0.5]),
-#             torchvision.transforms.RandomHorizontalFlip(),
-#             torchvision.transforms.CenterCrop(224),
-#             torchvision.transforms.Resize(image_size),
-    #         torchvision.transforms.ToTensor()
-        ])
-
-    trainset = ImageDataset(image_dir, data_dir, train=True, data_version=data_version, transform=transform, sampling=sampling, image_type=image_type, augment=augment, demo=demo)
-    testset = ImageDataset(image_dir, data_dir, train=False, data_version=data_version, transform=transform, sampling=sampling, image_type=image_type, augment=augment, demo=demo)
+    trainset = ImageDataset(image_dir, data_dir, image_size=image_size, train=True, data_version=data_version, sampling=sampling, augment=augment, demo=demo)
+    testset = ImageDataset(image_dir, data_dir, image_size=image_size, train=False, data_version=data_version, sampling=sampling, augment=augment, demo=demo)
     
     if not return_dataset:
         train_loader = torch.utils.data.DataLoader(trainset, batch_size=batch_size, num_workers=num_workers, shuffle=True, pin_memory=True)
@@ -159,7 +120,6 @@ def image_loader(image_dir, data_dir, batch_size, num_workers, image_size, data_
 
         return train_loader, test_loader
     else:
-        
         return trainset, testset
     
 class SurveyDataset(Dataset):
@@ -175,7 +135,7 @@ class SurveyDataset(Dataset):
 
 def train_test_split_data(x, data_version):
     
-    data = pd.read_csv(data_dir+"census_tracts_filtered-"+data_version+".csv")
+    data = pd.read_csv(data_dir+"TrainTestSplit/census_tracts_filtered-"+data_version+".csv")
     data = pd.merge(x, data, on='geoid')
     data = data.sort_values(by='geoid')
     
@@ -197,7 +157,7 @@ def load_aggregate_travel_behavior(file, data_version):
     # turn trip generation units to 1k trips`
     df_pivot['trpgen'] = df_pivot['trpgen']/1000
     
-    census_area = pd.read_csv(data_dir+"demo_tract.csv")[['geoid','area']]
+    census_area = pd.read_csv(data_dir+"Census_old/demo_tract.csv")[['geoid','area']]
     df_pivot = df_pivot.merge(census_area, on='geoid')
     data = train_test_split_data(df_pivot, data_version)
     
@@ -234,7 +194,7 @@ def load_demo_v2(data_dir, norm=2):
 
 def load_demo_v1(data_dir, norm=2):
 
-    demo_df = pd.read_csv(data_dir+"demo_tract.csv")
+    demo_df = pd.read_csv(data_dir+"Census_old/demo_tract.csv")
     demo_df['pop_density'] = demo_df['tot_population'] / demo_df['area']
 
     if norm == 3:
@@ -253,20 +213,15 @@ def load_demo_v1(data_dir, norm=2):
 #         return demo_df['geoid'].tolist(), demo_df[['high_inc', 'high_dens', 'senior', 'youngad', 'high_edu']].to_numpy()
         return demo_df['geoid'].tolist(), demo_df['high_dens'].to_numpy()
 
-    for d in ['pop_density','pct25_34yrs','pct35_50yrs','pctover65yrs',
-                 'pctwhite_alone','pct_nonwhite',
-                 'pctblack_alone',
-                 'pct_col_grad','avg_tt_to_work','inc_per_capita']:
-        if (norm == 0) or (norm == 'minmax'):
-            demo_df[d] = demo_df[d]/demo_df[d].max()
-        elif (norm == 1) or (norm == 'norm'):
-            demo_df[d] = (demo_df[d]-demo_df[d].mean())/demo_df[d].std()
-        elif norm == 2:
-            if d[:3] == 'pct':
-                demo_df[d] = (demo_df[d] - 0.5)/0.5
-            else:
-                demo_df[d] = demo_df[d]/demo_df[d].max()
-                demo_df[d] = (demo_df[d] - 0.5)/0.5
+    else:
+        for c in ['pop_density', 'pct25_34yrs', 'pct35_50yrs', 'pctover65yrs',
+                  'pctwhite_alone', 'pct_nonwhite',
+                  'pctblack_alone',
+                  'pct_col_grad', 'avg_tt_to_work', 'inc_per_capita']:
+
+            demo_df[c] = (demo_df[c] - demo_df[c].min()) / (demo_df[c].max() - demo_df[c].min())
+            demo_df[c] = (demo_df[c] - 0.5) / 0.5
+
   
 # 7 variables version
 #     demo_np = demo_df[['pop_density','pct25_34yrs','pct35_50yrs','pctover65yrs',
